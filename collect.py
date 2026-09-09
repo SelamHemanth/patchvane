@@ -44,6 +44,7 @@ from email.header import decode_header, make_header
 
 import aiclass
 import providers
+import vault
 from email.utils import parsedate_to_datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -714,13 +715,41 @@ CGIT_SHA = re.compile(r"commit/\?id=([0-9a-f]{7,40})'>(.*?)</a>", re.S)
 CGIT_DATE = re.compile(r"title='(\d{4}-\d\d-\d\d[^']*)'")
 
 
-def cgit_author_log(f: Fetcher, base: str, path: str) -> list:
+def my_names(out: dict) -> set:
+    """Every form of their name that is genuinely theirs.
+
+    Built from the From: line on their own posts, which lore only returned
+    because the address matched.  Used to check that a commit really is
+    theirs before it is counted as theirs."""
+    names = {ME}
+    local = ME.split("@")[0]
+    names.add(local)
+    # first.last@ and first_last@ are both usually "First Last" in git.
+    names.add(re.sub(r"[._-]+", " ", local))
+    for msgs in (out.get("lore_threads") or {}).values():
+        for m in msgs:
+            if (m.get("addr") or "").lower() == ME:
+                n = (m.get("name") or "").strip()
+                if n:
+                    names.add(n)
+    return {" ".join(n.lower().split()) for n in names if n}
+
+
+def cgit_author_log(f: Fetcher, base: str, path: str, mine: set = ()) -> list:
+    """Their commits in one tree.
+
+    cgit is asked for commits by this address, but the answer is checked
+    rather than trusted: the log table carries an author column, and a row
+    whose author is somebody else does not belong to this person however it
+    came back.  Without that check a subject like "fix typos in comments",
+    which several people write in the same week, ends up credited to whoever
+    happened to ask."""
     url = ("%s%s/log/?qt=author&q=%s&n=200"
            % (base, path, urllib.parse.quote(ME)))
     body = f.get(url, timeout=240)
     if not body:
         return []
-    found = []
+    found, refused = [], 0
     for row in CGIT_ROW.findall(body):
         m = CGIT_SHA.search(row)
         if not m:
@@ -729,12 +758,28 @@ def cgit_author_log(f: Fetcher, base: str, path: str) -> list:
         subject = htmllib.unescape(re.sub(r"<[^>]+>", "", m.group(2))).strip()
         if not subject:
             continue
+        cells = [htmllib.unescape(re.sub(r"<[^>]+>", "", x)).strip()
+                 for x in re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)]
+        # date, subject, author, files, changes: the author is the one after
+        # the subject.
+        author = ""
+        for i, cell in enumerate(cells):
+            if subject.startswith(cell[:20]) and cell and i + 1 < len(cells):
+                author = cells[i + 1]
+                break
+        if mine and author and " ".join(author.lower().split()) not in mine:
+            refused += 1
+            continue
         found.append({
             "commit": m.group(1),
             "subject": subject,
+            "author": author,
             "key": norm(subject),
             "date": (d.group(1) if d else "")[:19],
         })
+    if refused:
+        log("  %s: ignored %d commit(s) by somebody else"
+            % (path.strip("/").split("/")[-1] or path, refused))
     return found
 
 
@@ -866,6 +911,7 @@ def collect_korg(f: Fetcher, out: dict, quick: bool = False,
     cfg = CONFIG["korg"]
     base = cfg["base"]
     all_trees = cfg.get("trees", {})
+    mine = my_names(out)
 
     sweep = dict(cfg.get("always", {}))
     tree_urls = {name: base + path for name, path in
@@ -873,24 +919,49 @@ def collect_korg(f: Fetcher, out: dict, quick: bool = False,
     landed = defaultdict(dict)          # tree -> subject key -> commit
 
     for name, path in sweep.items():
-        rows = cgit_author_log(f, base, path)
+        rows = cgit_author_log(f, base, path, mine)
         log("git.kernel.org: %-12s %d commits" % (name, len(rows)))
         for r in rows:
             landed[name].setdefault(r["key"], r)
 
-    # hashes we already know about, from patchwork and from maintainers who
-    # replied with one
+    # Hashes we already know about, from patchwork and from maintainers who
+    # replied with one.  Patchwork is asked for this person's submissions by
+    # id, so what it returns is theirs by construction.
     known = {}
     for r in out.get("patchwork", []):
         if r.get("commit") and len(r["commit"]) >= 12:
             known[r["key"]] = r["commit"]
+
+    # The subjects this person actually posted a patch under.  A thread they
+    # took part in carries other people's patches too -- a series they were
+    # copied on, one they reviewed -- and a maintainer saying "applied,
+    # thanks" in that thread is usually saying it about somebody else's work.
+    # Without this check, being named on a thread is enough to be credited
+    # with its commit.
+    posted = set()
+    for msgs in out.get("lore_threads", {}).values():
+        for m in msgs:
+            if m.get("mine") and m.get("subject"):
+                posted.add(norm(m["subject"]))
+    for r in out.get("patchwork", []):
+        if r.get("key"):
+            posted.add(r["key"])
+
+    borrowed = 0
     for msgs in out.get("lore_threads", {}).values():
         for m in msgs:
             if not m.get("applied"):
                 continue
+            key = norm(m["subject"])
+            if key not in posted:
+                borrowed += 1
+                continue
             for h in m.get("commit_hints", []):
                 if len(h) >= 12:
-                    known.setdefault(norm(m["subject"]), h)
+                    known.setdefault(key, h)
+    if borrowed:
+        log("  ignored %d 'applied' reply(s) about somebody else's patch"
+            % borrowed)
 
     # Every maintainer tree carries Linus' history, so once a patch is in
     # mainline every tree answers yes and the answer means nothing.  Only ask
@@ -929,7 +1000,7 @@ def collect_korg(f: Fetcher, out: dict, quick: bool = False,
 
         def scan(item):
             name, path = item
-            rows = cgit_author_log(f, base, path)
+            rows = cgit_author_log(f, base, path, mine)
             with _print_lock:
                 done[0] += 1
                 log("git.kernel.org %d/%d %-14s %d commits"
@@ -981,20 +1052,41 @@ def build(out: dict, brain=None) -> dict:
         for r in rows:
             landed_by_key[r["key"]][tree] = r
 
+    # A subject long enough that two different patches are unlikely to share
+    # it as a prefix.  "net: fix typos in comments" is 26 characters and
+    # several people write it in the same month, so this is deliberately
+    # longer than that.
+    PREFIX_ENOUGH = 34
+
     def landed_for(key: str) -> dict:
-        """Maintainers routinely reword a subject as they apply it, usually by
-        adding detail: "LoongArch: fix typo" goes in as "LoongArch: Fix typo
-        ... of vmlinux.lds.S".  Fall back to a prefix match so the commit is
-        still tied to the patch it came from."""
+        """Which trees carry the commit for this patch.
+
+        An exact subject match first.  Maintainers do reword a subject as
+        they apply it, usually by adding detail -- "LoongArch: fix typo" goes
+        in as "LoongArch: Fix typo ... of vmlinux.lds.S" -- so a prefix is
+        accepted as a fallback, but carefully: long enough that it is not a
+        generic opening, cut at a word boundary so "fix typo" cannot claim
+        "fix typos", and only when exactly one commit matches. Two candidates
+        mean we cannot tell which patch it belongs to, and guessing is how a
+        commit ends up credited to the wrong one."""
         if key in landed_by_key:
             return landed_by_key[key]
-        if len(key) < 20:
+        if len(key) < PREFIX_ENOUGH:
             return {}
+        hits = []
         for other, where in landed_by_key.items():
-            if len(other) >= 20 and (other.startswith(key)
-                                     or key.startswith(other)):
-                return where
-        return {}
+            if len(other) < PREFIX_ENOUGH:
+                continue
+            short, long = sorted((key, other), key=len)
+            if not long.startswith(short):
+                continue
+            # The extra text has to begin a new word, so that "fix typo" does
+            # not swallow "fix typos in comments".
+            rest = long[len(short):]
+            if rest and not rest[0].isspace() and rest[0] not in ".,:;":
+                continue
+            hits.append(where)
+        return hits[0] if len(hits) == 1 else {}
 
     def lore_url(msgid: str) -> str:
         return "%s/all/%s/" % (lore_base, urllib.parse.quote(msgid))
@@ -1091,6 +1183,9 @@ def build(out: dict, brain=None) -> dict:
                     "commit": r["commit"],
                     "short": r["commit"][:12],
                     "date": r["date"],
+                    # Kept so the page can show whose commit this is, and so
+                    # a wrong one is visible rather than silent.
+                    "author": r.get("author", ""),
                     "url": "%s/commit/?id=%s" % (tree_urls.get(t, ""),
                                                  r["commit"]),
                 } for t, r in sorted(where.items())],
@@ -1776,9 +1871,28 @@ def main() -> int:
     if "--no-ai" not in flags:
         cfg = CONFIG.get("ai") or {}
         providers.configure(cfg.get("endpoints"))
+        # This person's own key, out of their own vault.  A collection for
+        # one person must never spend another's allowance, so there is no
+        # fallback to a server-wide key unless the operator asked for one.
+        mine = vault.read(os.path.join(OUT_DIR, "vault.json"),
+                          os.environ.get("PATCHVANE_SECRET")
+                          or os.environ.get("MAINLINE_SECRET") or "")
+        keys = dict(mine.get("keys") or {})
+        if os.environ.get("PATCHVANE_SHARED_KEYS", "").lower() in (
+                "1", "true", "yes", "on"):
+            for pid, key in providers.load_keys(None).items():
+                keys.setdefault(pid, key)
+        models = dict(cfg.get("models") or {})
+        models.update(mine.get("models") or {})
+        if not keys:
+            log("  no assistant key for %s, reading threads by text alone"
+                % ME)
         brain = aiclass.Classifier(
-            keys=providers.load_keys(os.path.join(HERE, "secrets.json")),
-            models=cfg.get("models"),
+            keys=keys,
+            models=models,
+            # Read states are about threads, not about who asked, so this
+            # cache is shared: two people on the same series get the same
+            # answer and it is only paid for once.
             cache_path=os.path.join(CACHE, "ai-states.json"),
             log=log,
             limit=int(cfg.get("classify_limit", 200)))

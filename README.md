@@ -62,9 +62,9 @@ address to configure and nothing to edit: sign in with your Gmail address and
 you get a dashboard of the patches you posted from it.
 
 The same server does this for everybody who signs in. Each address gets its
-own directory under `people/`, holding its own collected patches and its own
-notes, and one person's cookie only ever reaches their own. Nobody sees
-anybody else's dashboard, and there is no shared one.
+own directory under `people/`, holding its own collected patches, its own
+notes and its own API keys, and one person's cookie only ever reaches their
+own. Nobody sees anybody else's dashboard, and there is no shared one.
 
 The first time an address signs in there is nothing to show yet, because
 reading every thread it ever posted takes a few minutes. The page says so,
@@ -276,6 +276,27 @@ that, one accepted patch is counted once per version that shares its subject.
 A version that genuinely landed keeps its commit even if a later one was
 sent.
 
+### Whose commit it is
+
+Being named on a thread is not the same as having written the patch, and the
+difference is where a tracker like this quietly goes wrong. Three checks keep
+a commit from being credited to the wrong person:
+
+- git.kernel.org is asked for commits by your address, and the answer is
+  checked rather than trusted: the log carries an author column, and a row
+  authored by somebody else is dropped however it came back.
+- A maintainer replying "applied, thanks" is only believed when the patch
+  they are applying is one you posted. Threads carry other people's series —
+  ones you were copied on, ones you reviewed — and the reply in those is
+  about their work, not yours.
+- A commit whose subject was reworded on the way in is still matched to the
+  patch it came from, but only on a distinctive prefix, cut at a word
+  boundary, and only when exactly one patch matches. Two candidates mean it
+  cannot be told which, and it is left uncredited rather than guessed.
+
+Patches counted this way carry the author the commit was actually written
+under, so a wrong one is visible rather than silent.
+
 ### When a source cannot be reached
 
 If git.kernel.org does not answer, the collector keeps the last answer it got
@@ -300,10 +321,30 @@ Useful things to ask:
 - Summarise the review feedback I have received.
 - Which trees have accepted the most of my work?
 
-If you tick "keep it in `secrets.json`" keys are written to that file with
-mode `0600` so they survive a restart. Otherwise they live in memory until
-the server stops. `secrets.json` is the only file here that ever holds a
-secret; `config.json` never does.
+### Your key is yours
+
+A key you add is yours alone. It is written into your own vault under
+`people/`, encrypted with the server's secret, mode `0600`, and it is only
+ever spent on your questions and your collections. Somebody else signing in
+to the same server is asked for their own; they are never quietly handed
+yours, and they cannot read it.
+
+Tick "remember this" and the key survives a restart. Leave it and it lives in
+memory until the server stops. Either way, nothing about it reaches another
+account.
+
+The encryption covers the key where it sits: a stolen disk, a stray backup or
+a copied directory gives up nothing without `PATCHVANE_SECRET`. It cannot
+cover the running server, which has to decrypt the key in order to use it.
+Nothing that keeps a usable key on a machine can claim otherwise.
+
+If a model you picked stops existing, and providers retire them often, press
+**Test** in Settings. It finds one on your key that does answer and moves you
+onto it rather than leaving you with a dead setting.
+
+An operator who would rather supply one set of keys for everybody can set
+`PATCHVANE_SHARED_KEYS=1`, and then a key in the environment fills in for
+anyone who has not added their own. It is off by default.
 
 ## Where the numbers come from
 
@@ -371,7 +412,8 @@ style.css     dark and light themes
 config.json   what to collect
 providers.py  the models the assistant can use, and the failover between them
 aiclass.py    asks a model about threads the regular expressions could not read
-secrets.json  API keys, if you chose to keep them (mode 0600)
+vault.py      per-person secrets, encrypted where they sit
 cache/        fetched responses, safe to delete
-people/       one directory per signed-in address: their patches and notes
+people/       one directory per signed-in address: their patches, their notes
+              and their own encrypted vault.json of API keys (mode 0600)
 ```

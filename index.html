@@ -57,9 +57,16 @@
         <span class="sparkle">&#10022;</span> Ask AI</button>
 
       <div class="usermenu">
-        <span class="avatar" id="avatar">&nbsp;</span>
-        <span id="userlabel" class="uname">&mdash;</span>
-        <button class="out" id="signout" title="Sign out">&#9099;</button>
+        <button class="who" id="whobtn" title="Account"
+                aria-haspopup="true" aria-expanded="false">
+          <span class="avatar" id="avatar">&nbsp;</span>
+          <span id="userlabel" class="uname">&mdash;</span>
+          <span class="dots">&#8942;</span>
+        </button>
+        <div class="whomenu hidden" id="whomenu" role="menu">
+          <button role="menuitem" data-who="profile">Profile</button>
+          <button role="menuitem" data-who="signout">Sign out</button>
+        </div>
       </div>
     </header>
 
@@ -83,6 +90,7 @@
     <span class="aimark">&#10022;</span>
     <div><h2>Assistant</h2><p>grounded in what this dashboard collected</p></div>
     <div class="spacer"></div>
+    <button class="iconbtn" id="ainew" title="New chat">&#10133;</button>
     <button class="iconbtn" id="aiclose" title="Close (Esc)">&times;</button>
   </header>
   <div id="aichat" class="aichat"></div>

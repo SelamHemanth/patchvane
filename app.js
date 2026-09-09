@@ -9,6 +9,9 @@ const S = {
   status: {},
   tabs: {},
   chat: [],
+  /* Whose chat this is.  A conversation is about one person's patches and
+     often quotes their reviewers, so it must not outlive their session. */
+  chatWho: "",
   asking: false,
 };
 
@@ -1043,7 +1046,6 @@ function viewSettings() {
     ["general", "General", setGeneral],
     ["ai", "Assistant", setAI],
     ["sources", "Data sources", setSources],
-    ["privacy", "Privacy", setPrivacy],
   ]);
 }
 
@@ -1387,49 +1389,56 @@ function setSources() {
   return `<div class="row2" style="align-items:start">${cards}</div>`;
 }
 
-function setPrivacy() {
+/* The account, reached from the menu in the corner rather than the sidebar,
+   because it is about you rather than about your patches. */
+function viewProfile() {
   const st = S.status;
-  const on = st.privacy || ["nothing withheld"];
+  const p = (S.data && S.data.profile) || {};
+  const who = p.email || st.who || "";
+  const on = st.privacy || [];
   const cloud = st.mode === "cloud";
+  const keys = (S.providers || []).filter((x) => x.ready);
+
   return `<div class="row2" style="align-items:start">
-    <div class="panel" data-reveal><header><h2>What this deployment shows</h2>
-      <div class="spacer"></div>
-      <span class="pill ${cloud ? "green" : "grey"}">${esc(st.mode || "local")}</span></header>
-      <div class="body">
-      <ul class="asklist plain">
-        ${on.map((x) => `<li>${esc(x)}</li>`).join("")}
-      </ul>
-      <p class="hint">${cloud
-        ? `Running in cloud mode. Reviewer addresses are masked to
-           <code>a***@domain</code> on the way out, so a screenshot or a stray
-           export cannot be scraped for an address book.`
-        : `Running locally on your own machine, so nothing is held back. Set
-           <code>MAINLINE_MODE=cloud</code> and the redaction below switches on.`}</p>
+    <div class="panel" data-reveal><header><h2>You</h2></header><div class="body">
+      <div class="profilehead">
+        <span class="avatar big">${esc((who[0] || "?").toUpperCase())}</span>
+        <div>
+          <h3>${esc(p.name || who.split("@")[0] || "Signed in")}</h3>
+          <p class="hint" style="margin:2px 0 0">${esc(who)}</p>
+        </div>
+      </div>
       <dl class="kv">
-        <dt>Reviewer addresses</dt>
-        <dd>${on.includes("reviewer addresses masked") ? "masked" : "shown"}</dd>
-        <dt>Private notes</dt>
-        <dd>${on.includes("private notes withheld")
-              ? `withheld (${st.notes_withheld || 0})` : "shown"}</dd>
-        <dt>Message excerpts</dt>
-        <dd>${on.includes("message excerpts withheld") ? "withheld" : "shown"}</dd>
-        <dt>API keys on disk</dt>
-        <dd>${st.can_store_key === false ? "never" : "allowed"}</dd>
+        <dt>Patches tracked</dt><dd>${(S.data && S.data.patches || []).length}</dd>
+        <dt>Last collected</dt><dd>${st.generated ? esc(ago(st.generated)) : "not yet"}</dd>
+        <dt>Assistant keys</dt>
+        <dd>${keys.length ? keys.map((k) => esc(k.label)).join(", ")
+                          : "none of your own yet"}</dd>
       </dl>
+      ${p.lore ? `<p class="hint">Your posts:
+        <a href="${esc(p.lore)}" target="_blank" rel="noopener">on lore</a></p>` : ""}
+      <div class="btnrow">
+        <button class="btn" ${act(() => go("settings"))}>Settings</button>
+        <button class="btn danger" ${act(signOut)}>Sign out</button>
+      </div>
     </div></div>
 
-    <div class="panel" data-reveal><header><h2>Before you deploy</h2></header><div class="body">
+    <div class="panel" data-reveal><header><h2>Your data on this server</h2>
+      <div class="spacer"></div>
+      <span class="pill ${cloud ? "green" : "grey"}">${esc(st.mode || "local")}</span>
+    </header><div class="body">
       <ul class="asklist plain">
-        <li>Put it behind TLS. The session cookie is only marked
-            <code>Secure</code> when the request arrives over https.</li>
-        <li>Set <code>PATCHVANE_SECRET</code> and
-            <code>PATCHVANE_PASSPHRASE_HASH</code>. Cloud mode refuses to start
-            without them.</li>
-        <li>Never copy <code>data.json</code>, <code>cache/</code> or
-            <code>dashboard.html</code> into the image. They carry everything.</li>
-        <li>Run <code>python3 serve.py --check</code> in your pipeline. It exits
-            non-zero when the configuration is not deployable.</li>
+        <li>Your patches, notes and API keys live in a directory of your own.
+            Nobody else who signs in can reach them.</li>
+        <li>Your API keys are encrypted where they sit, and are only ever used
+            for your own questions and your own collections.</li>
+        <li>${on.includes("reviewer addresses masked")
+              ? "Reviewer addresses are masked to <code>a***@domain</code> before they leave this machine."
+              : "Reviewer addresses are shown in full, because this is running on your own machine."}</li>
+        <li>Nothing is ever written to a kernel mailing list. It only reads.</li>
       </ul>
+      <p class="hint">Signing out clears this browser's session. Your collected
+      patches stay, and are here when you sign back in.</p>
     </div></div>
   </div>`;
 }
@@ -1728,9 +1737,19 @@ async function testKey(id) {
   try {
     const r = await post("/api/ai/test", { provider: id });
     const body = await r.json();
-    S.keyTest = body.ok
-      ? { id, ok: true, msg: `${label(id)} answered on ${body.model}.` }
-      : { id, ok: false, msg: body.error || "No answer." };
+    if (body.ok && body.switched_from) {
+      /* The model that was set is gone, and one that works has been put in
+         its place.  Say so plainly rather than silently answering on a
+         different model than the one on screen. */
+      S.keyTest = { id, ok: true, moved: true,
+        msg: `${esc(body.switched_from)} is not available on your key any `
+           + `more, so this is now set to ${esc(body.model)}, which answered.` };
+      await loadProviders();   // the card must show the model it moved to
+    } else {
+      S.keyTest = body.ok
+        ? { id, ok: true, msg: `${label(id)} answered on ${body.model}.` }
+        : { id, ok: false, msg: body.error || "No answer." };
+    }
   } catch (e) {
     S.keyTest = { id, ok: false, msg: String(e.message || e) };
   }
@@ -1774,7 +1793,8 @@ const VIEWS = {
   outcomes:    ["Outcomes", "what landed and what did not", viewOutcomes],
   discussions: ["Discussions", "threads, people and review tags", viewDiscussions],
   insights:    ["Insights", "activity, subsystems and trees", viewInsights],
-  settings:    ["Settings", "refresh, assistant, sources and privacy", viewSettings],
+  settings:    ["Settings", "refresh, assistant and sources", viewSettings],
+  profile:     ["Profile", "your account and what this server keeps", viewProfile],
 };
 
 /* Older links and bookmarks should not land on an error. */
@@ -1792,6 +1812,34 @@ function go(view) {
 }
 
 function signOut() { location.href = "/logout"; }
+
+/* Start again, with nothing carried over: the whole conversation goes to the
+   model with every question, so an old thread is not just clutter on screen,
+   it is context the next answer will be built on. */
+function newChat() {
+  S.chat = [];
+  S.chatWho = (S.status && S.status.who) || "";
+  drawChat();
+  const input = $("aiinput");
+  if (input) { input.value = ""; input.style.height = "auto"; input.focus(); }
+}
+
+/* Signing in as somebody else must not inherit their conversation. */
+function chatBelongsToMe() {
+  const who = (S.status && S.status.who) || "";
+  if (S.chatWho && S.chatWho !== who) {
+    S.chat = [];
+    S.asking = false;
+  }
+  S.chatWho = who;
+}
+
+function toggleWhoMenu(want) {
+  const menu = $("whomenu");
+  const open = want === undefined ? menu.classList.contains("hidden") : want;
+  menu.classList.toggle("hidden", !open);
+  $("whobtn").setAttribute("aria-expanded", open ? "true" : "false");
+}
 
 /* keepFocus: the id of a grid whose search box should keep the caret. */
 function render(keepFocus) {
@@ -1966,6 +2014,7 @@ async function pollStatus() {
     const st = await r.json();
     const was = S.status.running;
     S.status = st;
+    chatBelongsToMe();
     if (S.data && st.generated && st.generated !== S.data.generated) {
       await load();
       S.stale = true;
@@ -2083,11 +2132,26 @@ async function boot() {
   $("theme").addEventListener("click", toggleTheme);
   $("aibtn").addEventListener("click", () => askAI());
   $("aiclose").addEventListener("click", closeAI);
+  $("ainew").addEventListener("click", newChat);
   $("aiscrim").addEventListener("click", closeAI);
   $("aisend").addEventListener("click", sendAI);
   $("helpopen").addEventListener("click", () => $("help").classList.add("on"));
   $("helpclose").addEventListener("click", () => $("help").classList.remove("on"));
-  $("signout").addEventListener("click", signOut);
+  /* The corner menu: Profile and Sign out, rather than a sign-out button
+     sitting one stray click away from ending the session. */
+  $("whobtn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleWhoMenu();
+  });
+  $("whomenu").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-who]");
+    if (!b) return;
+    toggleWhoMenu(false);
+    if (b.dataset.who === "signout") signOut();
+    else go("profile");
+  });
+  /* A menu that will not close is worse than no menu. */
+  document.addEventListener("click", () => toggleWhoMenu(false));
   $("aiinput").addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendAI(); }
   });

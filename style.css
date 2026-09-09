@@ -1131,3 +1131,29 @@ button.link.sm { font-size: 11px; margin-left: 6px; }
   animation: spin 900ms linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 body.firstrun nav, body.firstrun .aibtn { opacity: .35; pointer-events: none; }
+
+/* The account menu in the corner. */
+.usermenu { position: relative; }
+.who { display: flex; align-items: center; gap: 8px; padding: 4px 8px 4px 4px;
+  background: none; border: 1px solid transparent; border-radius: 999px;
+  color: inherit; cursor: pointer; font: inherit;
+  transition: background .15s, border-color .15s; }
+.who:hover { background: var(--card2); border-color: var(--line); }
+.who .dots { opacity: .55; font-size: 15px; line-height: 1; }
+.whomenu { position: absolute; top: calc(100% + 8px); right: 0; z-index: 60;
+  min-width: 168px; padding: 6px; background: var(--card);
+  border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: 0 14px 34px rgba(0,0,0,.36); }
+.whomenu.hidden { display: none; }
+.whomenu button { display: block; width: 100%; padding: 9px 12px;
+  background: none; border: 0; border-radius: 8px; color: var(--ink);
+  cursor: pointer; font: inherit; text-align: left; }
+.whomenu button:hover { background: var(--card2); }
+
+/* The profile page. */
+.profilehead { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+.profilehead h3 { margin: 0; font-size: 17px; font-weight: 650; }
+.avatar.big { width: 46px; height: 46px; font-size: 19px; }
+.btnrow { display: flex; gap: 10px; margin-top: 16px; }
+.btn.danger { border-color: color-mix(in srgb, var(--red) 45%, var(--line)); }
+.btn.danger:hover { background: color-mix(in srgb, var(--red) 14%, transparent); }

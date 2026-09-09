@@ -11,3 +11,4 @@ __pycache__/
 data.json
 notes.json
 dashboard.html
+secrets.json*

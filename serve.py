@@ -53,6 +53,7 @@ from http.server import BaseHTTPRequestHandler
 
 import providers
 import redact
+import vault
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -210,6 +211,8 @@ def state_of(email: str) -> dict:
 
 # Keys given through the page live here until the process ends.  Writing
 # them down is a separate, explicit choice.
+# Keys typed into the page, kept per person and only until the process ends.
+# Writing one down is a separate, explicit choice.
 RUNTIME_KEY = {}
 _CACHE = {}                     # email -> its collected file
 
@@ -599,6 +602,45 @@ def migrate_single_user() -> None:
         log("could not move the existing collection: %s" % exc)
 
 
+def migrate_secrets() -> None:
+    """Move a server-wide secrets.json into the owner's own vault.
+
+    Keys used to belong to the deployment, because there was only ever one
+    person using it.  Now they belong to people, and leaving the old file in
+    place would quietly hand one person's key to everybody who signs in."""
+    if not OWNER or not os.path.exists(SECRETS):
+        return
+    try:
+        with open(SECRETS, encoding="utf-8") as fh:
+            blob = json.load(fh)
+    except Exception:
+        return
+    keys = dict(blob.get("keys") or {})
+    if blob.get("gemini_api_key"):
+        keys.setdefault("gemini", blob["gemini_api_key"])
+    keys = {k: v for k, v in keys.items()
+            if v and k in providers.PROVIDERS}
+    if not keys:
+        return
+    mine = vault_of(OWNER)
+    have = dict(mine.get("keys") or {})
+    for pid, key in keys.items():
+        have.setdefault(pid, key)
+    mine["keys"] = have
+    # Carry the model choices from config.json across with them.
+    picked = dict((CONFIG.get("ai") or {}).get("models") or {})
+    if picked:
+        mine.setdefault("models", {})
+        for pid, model in picked.items():
+            mine["models"].setdefault(pid, model)
+    if not vault_save(OWNER, mine):
+        log("could not move the old keys into a vault; leaving them alone")
+        return
+    os.replace(SECRETS, SECRETS + ".migrated")
+    log("moved %d assistant key(s) from secrets.json into %s's own vault"
+        % (len(keys), quiet_addr(OWNER)))
+
+
 def scheduler() -> None:
     """Collect on a timer so the page stays current without anyone clicking.
 
@@ -629,25 +671,51 @@ def scheduler() -> None:
 # ------------------------------------------------------------------- the AI
 
 
-def secrets_blob() -> dict:
-    if not ALLOW_SECRET_FILE or not os.path.exists(SECRETS):
+# An operator can hand the whole deployment one set of keys, but that is a
+# deliberate choice and not the default: normally your keys are yours, and
+# somebody else signing in gets asked for their own.
+SHARED_KEYS = env_flag("PATCHVANE_SHARED_KEYS", False)
+
+
+def vault_path(email: str) -> str:
+    return os.path.join(home_of(email), "vault.json")
+
+
+def vault_of(email: str) -> dict:
+    """One person's own settings: their API keys and their model choices,
+    decrypted with the server secret."""
+    if not email:
         return {}
+    return vault.read(vault_path(email), SECRET)
+
+
+def vault_save(email: str, blob: dict) -> bool:
+    home = home_of(email)
     try:
-        with open(SECRETS) as fh:
-            return json.load(fh)
-    except Exception:
-        return {}
+        os.makedirs(home, exist_ok=True)
+    except OSError:
+        return False
+    return vault.write(vault_path(email), SECRET, blob)
 
 
-def ai_keys() -> dict:
-    """Every provider that has a key, and the key.
+def ai_keys(email: str = "") -> dict:
+    """Every provider this person has a key for, and the key.
 
-    Three places, in order: what was typed into the page this run, the
-    environment, then secrets.json.  The environment wins over the file so a
-    deployment can pin a key that the page cannot quietly replace."""
-    found = providers.load_keys(SECRETS if ALLOW_SECRET_FILE else None)
-    # A key typed into the page this run beats both of the stored places.
-    for pid, key in RUNTIME_KEY.items():
+    Theirs, out of their own encrypted vault, plus whatever they typed into
+    the page this session.  Another account's keys are never consulted: one
+    person paying for a model does not mean everybody gets to spend it.
+
+    An operator who does want to supply keys for everyone sets
+    PATCHVANE_SHARED_KEYS, and then the environment fills in what a person
+    has not set for themselves."""
+    found = {}
+    if SHARED_KEYS:
+        found.update(providers.load_keys(None))
+    for pid, key in (vault_of(email).get("keys") or {}).items():
+        if key and pid in providers.PROVIDERS:
+            found[pid] = key
+    # A key typed into the page this session beats what is written down.
+    for pid, key in (RUNTIME_KEY.get(email) or {}).items():
         if key and pid in providers.PROVIDERS:
             found[pid] = key
         elif not key:
@@ -655,66 +723,57 @@ def ai_keys() -> dict:
     return found
 
 
-def ai_models() -> dict:
+def ai_models(email: str = "") -> dict:
     """Which model to use per provider, when it is not the provider's own
-    default.  Set in config.json under ai.models."""
-    return (CONFIG.get("ai") or {}).get("models") or {}
+    default.  Each person picks their own."""
+    picked = dict((CONFIG.get("ai") or {}).get("models") or {})
+    picked.update(vault_of(email).get("models") or {})
+    return {k: v for k, v in picked.items() if v}
 
 
-def save_ai_key(pid: str, key: str) -> bool:
-    if not ALLOW_SECRET_FILE:
+def save_ai_key(email: str, pid: str, key: str) -> bool:
+    """Write a key into that person's vault, and nobody else's."""
+    if not ALLOW_SECRET_FILE or not email:
         return False
-    blob = secrets_blob()
-    keys = blob.get("keys") or {}
-    # Carry a key written under the old single-provider layout across to the
-    # new one, rather than dropping it the first time a second key is saved.
-    old = blob.pop("gemini_api_key", "")
-    if old and "gemini" not in keys:
-        keys["gemini"] = old
+    blob = vault_of(email)
+    keys = dict(blob.get("keys") or {})
     if key:
         keys[pid] = key
     else:
         keys.pop(pid, None)
     blob["keys"] = {k: v for k, v in keys.items() if v}
-    fd = os.open(SECRETS, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as fh:
-        json.dump(blob, fh, indent=1)
-    # The mode above only applies when this call created the file.  A
-    # secrets file someone made by hand would otherwise keep whatever their
-    # umask gave it, which for a file full of API keys is not good enough.
-    os.chmod(SECRETS, 0o600)
-    return True
+    return vault_save(email, blob)
 
 
-def ai_ready() -> list:
-    """Provider ids that could answer a question right now."""
-    keys = ai_keys()
+def ai_ready(email: str = "") -> list:
+    """Provider ids that could answer a question for this person right now."""
+    keys = ai_keys(email)
     return [pid for pid in providers.ORDER if keys.get(pid)]
 
 
-def ai_catalogue(keys=None) -> list:
-    """What to show on the settings page: every provider, and whether it is
-    set up.  Never includes a key, only whether there is one and where it
-    came from."""
-    keys = ai_keys() if keys is None else keys
-    blob = secrets_blob()
-    stored = set((blob.get("keys") or {}).keys())
-    if blob.get("gemini_api_key"):
-        stored.add("gemini")
+def ai_catalogue(email: str = "", keys=None) -> list:
+    """What to show one person on the settings page: every provider, and
+    whether they have set it up.  Never includes a key, only whether there
+    is one and where it came from."""
+    keys = ai_keys(email) if keys is None else keys
+    mine = vault_of(email)
+    stored = set((mine.get("keys") or {}).keys())
+    session = RUNTIME_KEY.get(email) or {}
+    picked = ai_models(email)
     out = []
     for pid in providers.ORDER:
         p = providers.PROVIDERS[pid]
-        have = bool(keys.get(pid))
         out.append({
             "id": pid, "label": p.label, "where": p.where,
             "env": p.key_env, "endpoint": p.base,
-            "model": ai_models().get(pid) or p.default,
+            "model": picked.get(pid) or p.default,
             "default": p.default,
             "good_at": sorted(p.good_at),
-            "ready": bool(have),
-            "source": ("this session" if RUNTIME_KEY.get(pid)
-                       else "environment" if env(p.key_env)
-                       else "secrets.json" if pid in stored else ""),
+            "ready": bool(keys.get(pid)),
+            "source": ("this session" if session.get(pid)
+                       else "saved for you" if pid in stored
+                       else "this deployment" if SHARED_KEYS and env(p.key_env)
+                       else ""),
         })
     return out
 
@@ -951,17 +1010,17 @@ def clean_history(raw) -> list:
 
 
 def ai_ask(question: str, digest: str, pinned: str = "",
-           history=()) -> dict:
+           history=(), email: str = "") -> dict:
     """Put the question to whichever model is best placed to take it, and
     keep going down the list when one falls over.
 
     The reply says which model actually answered and what happened to the
     ones before it, because an answer in a different voice with no
     explanation is unsettling."""
-    keys = ai_keys()
+    keys = ai_keys(email)
     if not any(keys.values()):
         return {"ok": False, "needs_key": True,
-                "error": "No API key for any model yet."}
+                "error": "You have not added an API key for any model yet."}
 
     # The digest rides with the current question rather than with the older
     # turns, so the model always reasons over today's numbers even when the
@@ -969,7 +1028,7 @@ def ai_ask(question: str, digest: str, pinned: str = "",
     prompt = ("Here is the current status digest.\n\n<digest>\n%s\n</digest>"
               "\n\nQuestion: %s" % (digest, question))
     answer, trail = providers.ask(
-        SYSTEM_PROMPT, prompt, keys, models=ai_models(),
+        SYSTEM_PROMPT, prompt, keys, models=ai_models(email),
         pinned=pinned or None, topic=question, history=history,
         timeout=int(env("PATCHVANE_AI_TIMEOUT", "180") or 180), log=log)
 
@@ -997,14 +1056,14 @@ def ai_ask(question: str, digest: str, pinned: str = "",
     return out
 
 
-def ai_model_list(pid: str) -> tuple:
-    """Every model this key can reach, and why it might not be able to."""
+def ai_model_list(pid: str, email: str = "") -> tuple:
+    """Every model this person's key can reach, and why it might not."""
     p = providers.PROVIDERS.get(pid)
     if not p:
         return False, [], "No such model service."
-    keys = ai_keys()
+    keys = ai_keys(email)
     if pid not in keys:
-        return False, [], "Add a key for %s first." % p.label
+        return False, [], "Add your own key for %s first." % p.label
     try:
         names = p.models(keys.get(pid, ""))
     except Exception as exc:                # a bad key, or the service down
@@ -1015,56 +1074,109 @@ def ai_model_list(pid: str) -> tuple:
     return True, names, ""
 
 
-def save_ai_model(pid: str, model: str) -> bool:
-    """Remember which model a provider should use.
+def save_ai_model(email: str, pid: str, model: str) -> bool:
+    """Remember which model this person wants from a provider.
 
-    It goes in config.json rather than secrets.json: it is a preference, not
-    a credential, and the collector reads the same file when it asks a model
-    to read a thread."""
+    Into their own vault, next to their key: the choice only makes sense
+    against the key that reaches it, and one person preferring a big model
+    should not spend somebody else's allowance on it."""
     p = providers.PROVIDERS.get(pid)
-    if not p or not model or len(model) > 120:
+    if not p or not model or len(model) > 120 or not email:
         return False
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:@-]*(?:/[A-Za-z0-9][A-Za-z0-9._:@-]*)*",
                         model) or ".." in model:
         return False
-    try:
-        with open(CONFIG_PATH, encoding="utf-8") as fh:
-            blob = json.load(fh)
-    except Exception:
-        return False
-    ai = blob.setdefault("ai", {})
-    picked = ai.setdefault("models", {})
+    blob = vault_of(email)
+    picked = dict(blob.get("models") or {})
     if model == p.default:
         picked.pop(pid, None)       # back to the default, so stop overriding
     else:
         picked[pid] = model
-    tmp = CONFIG_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(blob, fh, indent=1)
-        fh.write("\n")
-    os.replace(tmp, CONFIG_PATH)
-    CONFIG.setdefault("ai", {}).setdefault("models", {})
-    CONFIG["ai"]["models"] = dict(picked)
-    return True
+    blob["models"] = picked
+    return vault_save(email, blob)
 
 
-def ai_test(pid: str, key: str = "") -> dict:
+def ai_test(pid: str, key: str = "", email: str = "") -> dict:
     """One cheap round trip, to say whether a key works before it matters."""
     p = providers.PROVIDERS.get(pid)
     if not p:
         return {"ok": False, "error": "No such provider."}
-    key = key or ai_keys().get(pid, "")
+    key = key or ai_keys(email).get(pid, "")
     if not key:
         return {"ok": False, "error": "No key for %s yet." % p.label}
-    model = ai_models().get(pid) or p.default
+    model = ai_models(email).get(pid) or p.default
     answer = p.ask(key, model,
                    "Reply with the single word: ready.",
                    "Are you there?", timeout=45)
     if answer.ok:
         return {"ok": True, "model": model,
                 "reply": answer.text[:80], "label": p.label}
+
+    # The named model is gone or was never on this key: providers retire a
+    # model the moment the next one ships, and the name in a settings page
+    # outlives it.  Rather than leaving somebody with a dead setting and an
+    # error, find one on their key that does answer and move them onto it.
+    if gone(answer):
+        working, tried = find_working(p, key, model)
+        if working:
+            save_ai_model(email, pid, working)
+            return {"ok": True, "model": working, "label": p.label,
+                    "switched_from": model, "tried": tried,
+                    "reply": "%s is not there any more, so this is set to %s, "
+                             "which answered." % (model, working)}
     return {"ok": False, "error": answer.detail, "model": model,
             "status": answer.status}
+
+
+def gone(answer) -> bool:
+    """Whether a failure means "no such model" rather than "busy just now".
+
+    Only the first is worth switching over: a model that is merely
+    overloaded will be back, and quietly moving somebody off it would lose
+    them the model they chose."""
+    if answer.status in (404, 400):
+        return True
+    detail = (answer.detail or "").lower()
+    return any(x in detail for x in (
+        "not found", "does not exist", "no such model", "unknown model",
+        "deprecated", "decommissioned", "unsupported model",
+        "invalid model", "model_not_found", "has been retired"))
+
+
+def find_working(p, key: str, avoid: str = "") -> tuple:
+    """The best model on this key that actually answers.
+
+    The provider's own default first, then the spares it ships with: those
+    are curated and current, which a name sorted out of a catalogue is not.
+    After that, models from the same family as the one that died, so a key
+    pinned to gpt-5.1 lands on another gpt-5 rather than something unrelated.
+
+    A model that is merely busy is skipped rather than settled on, and the
+    search does not stop for it: being rate limited says nothing about
+    whether the next model works.  Capped, because each attempt is a real
+    request against somebody's key."""
+    family = re.split(r"[-.]", avoid)[0].lower() if avoid else ""
+    try:
+        catalogue = [m for m in p.models(key) if m != avoid]
+    except Exception:
+        catalogue = []
+
+    order = []
+    for m in [p.default] + list(getattr(p, "spares", ())):
+        if m and m != avoid and m not in order:
+            order.append(m)
+    for m in sorted(catalogue, reverse=True):
+        if family and m.lower().startswith(family) and m not in order:
+            order.append(m)
+
+    tried = []
+    for model in order[:6]:
+        tried.append(model)
+        answer = p.ask(key, model, "Reply with the single word: ready.",
+                       "Are you there?", timeout=30)
+        if answer.ok:
+            return model, tried
+    return "", tried
 
 
 # ------------------------------------------------------------------ handler
@@ -1257,7 +1369,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send(200, json.dumps(d).encode(), "application/json")
         elif path == "/api/status":
             d = load_data(me, public=True)
-            ready = ai_ready()
+            ready = ai_ready(me)
             self.json_out(200, {
                 "ok": True,
                 "mode": MODE,
@@ -1278,18 +1390,18 @@ class Handler(BaseHTTPRequestHandler):
                 "ai_count": len(ready),
             })
         elif path == "/api/ai/providers":
-            self.json_out(200, {"ok": True, "providers": ai_catalogue(),
-                                "ready": ai_ready(),
+            self.json_out(200, {"ok": True, "providers": ai_catalogue(me),
+                                "ready": ai_ready(me),
                                 "zones": providers.ZONES,
                                 "can_store_key": ALLOW_SECRET_FILE})
         elif path == "/api/ai/models":
             pid = (q.get("provider") or [""])[0]
-            ok, names, why = ai_model_list(pid)
+            ok, names, why = ai_model_list(pid, me)
             p = providers.PROVIDERS.get(pid)
             self.json_out(200, {"ok": ok, "models": names, "provider": pid,
                                 "error": why,
                                 "spares": list(p.spares) if p else [],
-                                "current": (ai_models().get(pid) or
+                                "current": (ai_models(me).get(pid) or
                                             (p.default if p else ""))})
         elif path.lstrip("/") in STATIC:
             self.file_out(path.lstrip("/"))
@@ -1410,7 +1522,7 @@ class Handler(BaseHTTPRequestHandler):
             recent = " ".join([t["text"] for t in past[-3:]] + [question])
             out = ai_ask(question,
                          build_digest(d) + focus(d, recent),
-                         pinned, history=past)
+                         pinned, history=past, email=me)
             # Always 200: "every model was busy" is an answer about the
             # models, not a failure of this server, and the page shows it in
             # the conversation where the question was asked.
@@ -1422,17 +1534,17 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_out(400, {"ok": False, "error": "no such provider"})
                 return
             key = (form.get("key") or "").strip()
-            RUNTIME_KEY[pid] = key
+            RUNTIME_KEY.setdefault(me, {})[pid] = key
             stored = False
             if form.get("remember"):
-                stored = save_ai_key(pid, key)
+                stored = save_ai_key(me, pid, key)
             if not key and not stored:
-                RUNTIME_KEY.pop(pid, None)
-            log("assistant key for %s %s"
-                % (pid, "set" if key else "removed"))
+                RUNTIME_KEY.get(me, {}).pop(pid, None)
+            log("assistant key for %s %s, for %s"
+                % (pid, "set" if key else "removed", quiet_addr(me)))
             self.json_out(200, {"ok": True, "provider": pid,
-                                "ready": ai_ready(),
-                                "providers": ai_catalogue(),
+                                "ready": ai_ready(me),
+                                "providers": ai_catalogue(me),
                                 "stored": stored,
                                 "can_store_key": ALLOW_SECRET_FILE})
         elif path == "/api/ai/model":
@@ -1442,20 +1554,22 @@ class Handler(BaseHTTPRequestHandler):
             if pid not in providers.PROVIDERS:
                 self.json_out(400, {"ok": False, "error": "no such provider"})
                 return
-            if not save_ai_model(pid, model):
+            if not save_ai_model(me, pid, model):
                 self.json_out(400, {"ok": False,
                                     "error": "that is not a usable model name"})
                 return
-            log("assistant model for %s set to %s" % (pid, model))
+            log("assistant model for %s set to %s, for %s"
+                % (pid, model, quiet_addr(me)))
             self.json_out(200, {"ok": True, "provider": pid, "model": model,
-                                "providers": ai_catalogue()})
+                                "providers": ai_catalogue(me)})
         elif path == "/api/ai/test":
             form = self.body()
             pid = (form.get("provider") or "").strip()
             if pid not in providers.PROVIDERS:
                 self.json_out(400, {"ok": False, "error": "no such provider"})
                 return
-            self.json_out(200, ai_test(pid, (form.get("key") or "").strip()))
+            self.json_out(200, ai_test(pid, (form.get("key") or "").strip(),
+                                       me))
         else:
             self.send(404, b"not found", "text/plain; charset=utf-8")
 
@@ -1645,6 +1759,7 @@ def main() -> int:
     # which the scheduler does on its own.
     os.makedirs(PEOPLE, exist_ok=True)
     migrate_single_user()
+    migrate_secrets()
 
     threading.Thread(target=scheduler, daemon=True).start()
 
@@ -1674,10 +1789,17 @@ def main() -> int:
     log("privacy: %s" % ", ".join(policy().describe()))
     log("auto refresh %s" % ("every %g min" % STATE["interval"]
                              if STATE["auto"] else "off"))
-    ready = ai_ready()
-    log("assistant: %s" % (", ".join(
-        providers.PROVIDERS[p].label for p in ready) if ready
-        else "no API key yet"))
+    # Keys belong to people now, so there is no server-wide list to print.
+    if SHARED_KEYS:
+        ready = [p for p in providers.ORDER if providers.load_keys(None).get(p)]
+        log("assistant: %s, shared with everyone who signs in"
+            % (", ".join(providers.PROVIDERS[p].label for p in ready)
+               if ready else "no key in the environment"))
+    else:
+        with_keys = sum(1 for c in known_people()
+                        if (vault_of(c["email"]).get("keys") or {}))
+        log("assistant: each person uses their own key (%d of %d set up)"
+            % (with_keys, len(known_people())))
     if CLOUD:
         log("expecting TLS to be terminated in front of this process")
 
