@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in &mdash; Patchvane</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%234c8dff'/><path d='M8 22h16' stroke='white' stroke-width='2.6' stroke-linecap='round'/><path d='M11 22c0-6 4-8 9-8' stroke='%23a5d6ff' stroke-width='2.6' fill='none' stroke-linecap='round'/><circle cx='24' cy='11' r='3' fill='white'/></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="loginpage">
+  <div class="loginside">
+    <div class="logo">
+      <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
+        <rect width="32" height="32" rx="9" fill="url(#lg)"/>
+        <path d="M7 23h18" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>
+        <path d="M11 23c0-7 4-9 10-9" stroke="#bcd9ff" stroke-width="2.6"
+              fill="none" stroke-linecap="round"/>
+        <circle cx="24" cy="10" r="3.2" fill="#fff"/>
+        <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#4c8dff"/><stop offset="1" stop-color="#2dd4bf"/>
+        </linearGradient></defs>
+      </svg>
+      <span class="wordmark">Patchvane<i>upstream patch tracker</i></span>
+    </div>
+    <h1>Every patch you sent, from posted to mainline.</h1>
+    <p>Patchvane reads lore.kernel.org, patchwork.kernel.org and git.kernel.org
+    and works out where each of your patches actually is: waiting for a first
+    reply, carrying a Reviewed-by, applied to a maintainer tree, sitting in
+    linux-next, or merged.</p>
+    <ul class="loginfacts">
+      <li>Nothing is written to any kernel list. It only reads.</li>
+      <li>Sign in and it tracks your address. Nobody sees anybody else's.</li>
+      <li>Reviewer addresses are masked before they leave the machine.</li>
+    </ul>
+  </div>
+
+  <form class="loginbox" method="post" action="/login">
+    <h2>Sign in</h2>
+    <p class="lead" id="lead">Checking what this server accepts&hellip;</p>
+
+    <div class="err hidden" id="err"></div>
+
+    <div class="seg pick hidden" id="pick">
+      <button type="button" data-method="gmail">Gmail app password</button>
+      <button type="button" data-method="passphrase">Passphrase</button>
+    </div>
+    <input type="hidden" name="method" id="method" value="gmail">
+
+    <div id="gmailfields" class="hidden">
+      <div class="field">
+        <label for="email">Gmail address</label>
+        <input id="email" name="email" type="email" autocomplete="username"
+               placeholder="you@gmail.com">
+      </div>
+      <div class="field">
+        <label for="password">App password</label>
+        <input id="password" name="password" type="password"
+               autocomplete="current-password" placeholder="16 characters">
+      </div>
+    </div>
+
+    <div class="hidden" id="passfield">
+      <div class="field">
+        <label for="passphrase">Passphrase</label>
+        <input id="passphrase" name="passphrase" type="password"
+               autocomplete="one-time-code" placeholder="the one you set">
+      </div>
+      <!-- A passphrase says you may come in, but not who you are, so the
+           dashboard has to be told whose patches to show. -->
+      <div class="field">
+        <label for="track">Whose patches to track</label>
+        <input id="track" name="track" type="email" autocomplete="email"
+               data-optional="1"
+               placeholder="the address you send patches from">
+        <p class="hint">Only used to know whose patches to collect. Leave it
+        blank to use the address this server was set up with.</p>
+      </div>
+    </div>
+
+    <button class="btn primary" type="submit" id="go">Sign in</button>
+
+    <p class="note hidden" id="note">
+      Google will not accept your account password here, only an app password.
+      Create one at <code>myaccount.google.com/apppasswords</code>. It is
+      checked against Gmail and never stored.
+    </p>
+  </form>
+</div>
+
+<script src="login.js"></script>
+</body>
+</html>

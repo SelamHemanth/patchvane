@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Patchvane &mdash; upstream patch tracker</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%234c8dff'/><path d='M8 22h16' stroke='white' stroke-width='2.6' stroke-linecap='round'/><path d='M11 22c0-6 4-8 9-8' stroke='%23a5d6ff' stroke-width='2.6' fill='none' stroke-linecap='round'/><circle cx='24' cy='11' r='3' fill='white'/></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="bar" class="barload"></div>
+
+<div class="shell">
+  <aside class="sidebar">
+    <div class="logo">
+      <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
+        <rect width="32" height="32" rx="9" fill="url(#lg)"/>
+        <path d="M7 23h18" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>
+        <path d="M11 23c0-7 4-9 10-9" stroke="#bcd9ff" stroke-width="2.6"
+              fill="none" stroke-linecap="round"/>
+        <circle cx="24" cy="10" r="3.2" fill="#fff"/>
+        <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#4c8dff"/><stop offset="1" stop-color="#2dd4bf"/>
+        </linearGradient></defs>
+      </svg>
+      <span class="wordmark">Patchvane<i>upstream patch tracker</i></span>
+    </div>
+
+    <nav id="nav"></nav>
+
+    <div class="sidefoot">
+      <button class="hint-btn" id="helpopen">
+        Keyboard shortcuts <span class="kbd">?</span></button>
+    </div>
+  </aside>
+
+  <div class="app">
+    <header class="topbar">
+      <div class="ttl">
+        <h1 id="viewtitle">Overview</h1>
+        <p id="viewsub"></p>
+      </div>
+      <div class="spacer"></div>
+
+      <div class="stamp">
+        <span class="dot live" id="live"></span>
+        <span>
+          <b id="stamp">&mdash;</b>
+          <i id="stampsub"></i>
+        </span>
+      </div>
+
+      <button class="iconbtn" id="refresh" title="Collect fresh data (r)">&#8635;</button>
+      <button class="iconbtn" id="theme" title="Switch theme (t)">&#9789;</button>
+      <button class="aibtn" id="aibtn" title="Ask the assistant (a)">
+        <span class="sparkle">&#10022;</span> Ask AI</button>
+
+      <div class="usermenu">
+        <span class="avatar" id="avatar">&nbsp;</span>
+        <span id="userlabel" class="uname">&mdash;</span>
+        <button class="out" id="signout" title="Sign out">&#9099;</button>
+      </div>
+    </header>
+
+    <main class="content" id="view">
+      <div class="skeleton">
+        <div class="sk sk-hero"></div>
+        <div class="sk-row">
+          <div class="sk sk-card"></div><div class="sk sk-card"></div>
+          <div class="sk sk-card"></div><div class="sk sk-card"></div>
+        </div>
+        <div class="sk sk-wide"></div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- assistant -->
+<div id="aiscrim" class="scrim"></div>
+<aside id="ai" class="drawer">
+  <header>
+    <span class="aimark">&#10022;</span>
+    <div><h2>Assistant</h2><p>grounded in what this dashboard collected</p></div>
+    <div class="spacer"></div>
+    <button class="iconbtn" id="aiclose" title="Close (Esc)">&times;</button>
+  </header>
+  <div id="aichat" class="aichat"></div>
+  <div class="aiform">
+    <div id="aipicker" class="aipicker"></div>
+    <div class="airow">
+      <textarea id="aiinput" rows="1" placeholder="Ask about your patches"></textarea>
+      <button id="aisend" class="btn primary" title="Send (Enter)">&#10148;</button>
+    </div>
+  </div>
+</aside>
+
+<!-- shortcuts -->
+<div id="help" class="help">
+  <div class="helpcard">
+    <header><h2>Keyboard shortcuts</h2><div class="spacer"></div>
+      <button class="iconbtn" id="helpclose">&times;</button></header>
+    <dl>
+      <dt><span class="kbd">1</span>&ndash;<span class="kbd">7</span></dt><dd>jump to a section</dd>
+      <dt><span class="kbd">/</span></dt><dd>search the list on screen</dd>
+      <dt><span class="kbd">a</span></dt><dd>open the assistant</dd>
+      <dt><span class="kbd">r</span></dt><dd>refresh now</dd>
+      <dt><span class="kbd">t</span></dt><dd>switch theme</dd>
+      <dt><span class="kbd">Esc</span></dt><dd>close whatever is open</dd>
+    </dl>
+    <p class="hint">In any list, click a column to sort and shift-click a second
+    one to sort by both. The search box takes <code>tree:net-next</code>,
+    <code>state:awaiting</code>, <code>replies&gt;0</code> and quoted phrases.</p>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="ui.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

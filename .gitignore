@@ -1,0 +1,13 @@
+.env
+secrets.json
+
+# One directory per person who signed in: their collected patches and their
+# notes.  Nobody else's business, and rebuilt from public archives anyway.
+people/
+cache/
+__pycache__/
+
+# Older single-address layouts, before people/ existed.
+data.json
+notes.json
+dashboard.html
