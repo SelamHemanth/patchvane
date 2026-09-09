@@ -119,6 +119,40 @@ def worth_checking(state, replies, history=()) -> bool:
     return False
 
 
+def conversation(thread) -> str:
+    """A thread as the model sees it, in order, so it can tell who spoke
+    last and what they wanted."""
+    msgs = sorted([m for m in thread if m.get("date")],
+                  key=lambda m: m["date"])
+    lines = []
+    for m in msgs[-6:]:
+        body = re.sub(r"\n{3,}", "\n\n",
+                      "\n".join(l for l in (m.get("body") or "").splitlines()
+                                if not l.startswith(">")).strip())[:700]
+        who = m.get("name") or m.get("addr") or "somebody"
+        if m.get("mine"):
+            who += " (the patch author)"
+        if m.get("bot"):
+            who += " (a bot)"
+        tags = ", ".join(t["tag"] for t in m.get("tags") or [])
+        lines.append("  %s said%s: %s"
+                     % (who, " (%s)" % tags if tags else "",
+                        body or "(nothing quotable)"))
+    return "\n".join(lines) or "  (nothing was said)"
+
+
+def reply_fingerprint(subject, thread) -> str:
+    """So an unchanged thread is only ever asked about once."""
+    h = hashlib.sha256()
+    h.update(("reply\x00%s" % subject).encode("utf-8", "replace"))
+    for m in sorted([x for x in thread if x.get("date")],
+                    key=lambda x: x["date"]):
+        h.update(("\x02%s\x03%s\x04%s"
+                  % (m.get("addr", ""), m.get("date", ""),
+                     (m.get("body") or "")[:400])).encode("utf-8", "replace"))
+    return h.hexdigest()[:32]
+
+
 def fingerprint(subject, replies, history=(), recorded="") -> str:
     """Identifies the evidence, so an unchanged thread is never asked about
     twice, and one that gained a reply, a version or a new patchwork state
@@ -191,6 +225,38 @@ def story(case) -> str:
     if not hist:
         lines.append(snippet(case.get("replies") or []) or "  nothing came back")
     return "\n".join(lines)
+
+
+REPLY_SYSTEM = """You read Linux kernel mailing list threads and say whether
+the patch author owes a reply.
+
+Kernel lists are read by thousands of people, and an unnecessary reply wastes
+all of their attention. Maintainers treat "thanks for applying" and other
+acknowledgements as noise. Silence is the correct, polite answer to good
+news. Only say a reply is needed when somebody is genuinely blocked without
+one.
+
+A reply is NOT needed when:
+- a maintainer says they applied, queued, took, picked up, pushed or merged
+  the patch, however they phrase it and whatever they call the branch.
+  "Applied 1-2 to sched_ext/for-7.4" needs nothing back. Branch names are
+  arbitrary and often contain no hint that they are a staging branch.
+- somebody sends a Reviewed-by, Acked-by or Tested-by and asks nothing.
+- the last message only thanks, congratulates or closes the discussion.
+- a bot reports a result and no human asked for anything.
+- the patch was rejected with no route forward offered, or was superseded.
+
+A reply IS needed when:
+- a reviewer asks a direct question, or asks for a change or a new version.
+- somebody disagrees or misunderstands and is waiting for the author.
+- a maintainer asks the author to resend, rebase, split or target another
+  tree.
+- somebody asks the author to confirm, test or explain something.
+
+Answer with JSON only, an array, one object per thread, in the order given:
+[{"n": 1, "reply": false, "why": "Tejun applied 1-2 to sched_ext/for-7.4"}]
+
+"why" must be under twelve words and must quote or paraphrase the thread."""
 
 
 class Classifier:
@@ -271,6 +337,81 @@ class Classifier:
                 found[c["id"]] = got
         self.save()
         return found
+
+    def replies_needed(self, threads) -> list:
+        """For each thread, True if a reply is owed, False if it would be
+        noise, None when there is no answer either way.
+
+        The collector has already decided a reply looks owed; this is the
+        second opinion on the ones its regular expressions could not read.
+        Anything unanswered stays as the collector had it, so a missing key
+        or a model that will not reply leaves the page exactly as before."""
+        out = [None] * len(threads)
+        pending = []
+        for i, t in enumerate(threads):
+            fp = reply_fingerprint(t["subject"], t.get("thread") or ())
+            hit = self.cache.get(fp)
+            if hit and "reply" in hit:
+                out[i] = hit["reply"]
+            else:
+                pending.append((i, fp, t))
+
+        if not pending or not self.usable:
+            return out
+
+        pending = pending[:self.limit]
+        for i in range(0, len(pending), self.batch):
+            chunk = pending[i:i + self.batch]
+            answers = self._ask_replies(chunk)
+            if answers is None:
+                break
+            for n, (idx, fp, _) in enumerate(chunk, 1):
+                if n in answers:
+                    out[idx] = answers[n]
+                    self.cache[fp] = {"reply": answers[n]}
+        self.save()
+        return out
+
+    def _ask_replies(self, chunk):
+        lines = []
+        for n, (_, _, t) in enumerate(chunk, 1):
+            lines.append("[%d] %s (status: %s)\n%s"
+                         % (n, t["subject"], t.get("state") or "unknown",
+                            conversation(t.get("thread") or ())))
+        answer, trail = providers.ask(
+            REPLY_SYSTEM, "\n\n".join(lines), self.keys, models=self.models,
+            topic="code", timeout=180)
+        self.asked += 1
+        if not answer.ok:
+            self.failed = answer.detail
+            self.log("  the model could not read these threads: %s"
+                     % answer.detail)
+            return None
+        return self._parse_replies(answer.text, len(chunk))
+
+    @staticmethod
+    def _parse_replies(text, count):
+        raw = re.sub(r"^```(?:json)?|```$", "", text.strip(), flags=re.M)
+        start, end = raw.find("["), raw.rfind("]")
+        if start < 0 or end < start:
+            return {}
+        try:
+            blob = json.loads(raw[start:end + 1])
+        except Exception:
+            return {}
+        out = {}
+        for item in blob if isinstance(blob, list) else []:
+            if not isinstance(item, dict):
+                continue
+            try:
+                n = int(item.get("n"))
+            except (TypeError, ValueError):
+                continue
+            # Only a real boolean counts.  A model that answers "maybe"
+            # leaves the collector's own answer standing.
+            if 1 <= n <= count and isinstance(item.get("reply"), bool):
+                out[n] = item["reply"]
+        return out
 
     def _ask(self, chunk):
         lines = []

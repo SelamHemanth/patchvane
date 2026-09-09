@@ -1,0 +1,28 @@
+# Patchvane runs on the Python standard library alone.
+#
+# There is deliberately nothing to install. No requests, no Flask, no crypto
+# library: the HTTP client and server, the mbox parsing, the JSON, the TLS
+# and the encryption in vault.py all come from what Python already ships.
+#
+# That is a decision worth keeping. This reads from lore.kernel.org,
+# patchwork and git.kernel.org and holds people's API keys, so every
+# dependency would be one more thing to trust and one more thing to patch.
+# An empty requirements file is the point of it, not an oversight.
+#
+#     pip install -r requirements.txt     # succeeds, installs nothing
+#     python3 serve.py                    # just works
+#
+# What it does need is a recent enough interpreter:
+#
+#     Python >= 3.10
+#
+# for the `float | None` annotation syntax used in collect.py. Nothing here
+# needs 3.11 or later, though it is tested on 3.11.
+#
+# If you want to drive the page in a browser to check a change by hand,
+# playwright does that, and is the only thing this project has ever wanted
+# from outside. Install it separately when you need it:
+#
+#     pip install playwright && playwright install chromium
+#
+# The app itself never imports it.

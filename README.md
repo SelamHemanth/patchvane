@@ -16,6 +16,10 @@ cd patchvane
 python3 serve.py            # then open http://127.0.0.1:8787
 ```
 
+There is no install step. `requirements.txt` is there and lists nothing,
+because the whole of this runs on the Python standard library: no requests,
+no web framework, no crypto library. All it wants is Python 3.10 or newer.
+
 Sign in, and it starts collecting the patches you posted from that address.
 The first run takes a few minutes because it reads the whole lore archive for
 you. After that the server keeps collecting on a timer, so the page stays
@@ -372,6 +376,54 @@ buckets are meant to add up.
 something last, and series where changes were requested, each with the
 version number the next posting should carry.
 
+### When no reply is owed
+
+A kernel list is read by thousands of people, and a reply that tells nobody
+anything wastes all of their attention. Maintainers treat acknowledgements as
+noise, so "thanks for applying" is the wrong answer to good news; silence is
+the right one. Nothing that has been applied, reviewed without a question,
+superseded or turned down appears in **Your turn**, and the assistant will
+not draft you a thank-you note for one.
+
+Working out which is which is harder than it sounds, because maintainers say
+it however they like and the branch is whatever they called it:
+
+    Applied 1-2 to sched_ext/for-7.4.
+
+Nothing in that names a staging branch, the patch numbers sit between the
+verb and the tree, and the message opens with "Hello," on its own line so a
+glance at the first line shows nothing at all. Three things stop it being
+read as a request:
+
+- the phrasings are matched with the patch range allowed for, so "applied
+  1-2 to", "applied patches 1-3 to" and "applied 1,2 and 4 to" all read as
+  applied;
+- a settled state closes the thread whatever the prose says, worked out
+  after a model has read the thread rather than before, which is where this
+  used to go wrong;
+- what is still unclear goes to a model, which is asked the question
+  directly: is anybody actually waiting on this person, or would a reply be
+  noise? Threads it reads as needing nothing drop out.
+
+The first run of this on a real account took **Your turn** from 38 threads to
+10, and the 10 that remain are all somebody asking a question, requesting a
+change, or waiting on an answer.
+
+With no API key the first two still apply; only the third is skipped.
+
+### Reading a patch without leaving the page
+
+Clicking a subject anywhere — a patch, a thread, a commit that landed —
+opens the whole thing here rather than throwing you at lore in another tab.
+It leads with what the patch actually needs from you, then the commit and
+which trees carry it, the versions you sent, the rest of the series, and the
+conversation in full with the quoted patch folded down. **Open in lore** is
+in the corner for the original.
+
+Nothing is fetched until you ask for it, and the message id is checked
+against your own patches first, so the endpoint cannot be used to fetch
+arbitrary threads or to find out what anybody else is tracking.
+
 ## Configuring
 
 `config.json`
@@ -413,6 +465,7 @@ config.json   what to collect
 providers.py  the models the assistant can use, and the failover between them
 aiclass.py    asks a model about threads the regular expressions could not read
 vault.py      per-person secrets, encrypted where they sit
+requirements.txt  empty on purpose: the standard library is the whole of it
 cache/        fetched responses, safe to delete
 people/       one directory per signed-in address: their patches, their notes
               and their own encrypted vault.json of API keys (mode 0600)

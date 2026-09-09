@@ -72,6 +72,22 @@ class Policy:
             return addr
         return mask_addr(addr)
 
+    def message(self, text: str) -> str:
+        """A whole message, for the reader who opened it deliberately.
+
+        Not capped the way an excerpt is: the point of opening a thread is to
+        read what was said.  Addresses inside it are still masked when the
+        deployment masks addresses, since a quoted reply carries as many of
+        them as a header does."""
+        if self.scrub_excerpts:
+            return ""
+        text = text or ""
+        return scrub_text(text) if self.mask_addresses else text
+
+    def address(self, addr: str) -> str:
+        """One address, masked or not according to this policy."""
+        return self._addr(addr)
+
     def _excerpt(self, text: str) -> str:
         if self.scrub_excerpts:
             return ""

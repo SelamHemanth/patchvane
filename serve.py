@@ -196,6 +196,11 @@ STATE = {
 RUNS = {}
 RUNS_LOCK = threading.Lock()
 
+# The collector keeps who it is working for in module globals, so two people
+# opening a patch at the same moment would otherwise fetch under each other's
+# name and cache under each other's address.  One at a time through here.
+COLLECT_MODULE_LOCK = threading.Lock()
+
 
 def state_of(email: str) -> dict:
     """The last run for one person, created empty the first time."""
@@ -971,6 +976,23 @@ How to answer:
 - Reviewer addresses reach you masked, as a***@domain. Never try to
   reconstruct one, and never print one.
 - Never invent a commit hash, a maintainer name or a review tag.
+
+On whether to reply at all. A kernel list is read by thousands of people, and
+a reply that tells nobody anything wastes all of their attention. Maintainers
+treat acknowledgements as noise.
+- When a maintainer says they applied, queued, took, picked up or merged the
+  patch, nothing is owed. Say so, and do not draft a thank-you note. Offer
+  one only if the person asks for it, and say plainly that it is not expected.
+  Branch names are arbitrary: "Applied 1-2 to sched_ext/for-7.4" is the same
+  good news as "applied to net-next", and neither wants an answer.
+- The same goes for a bare Reviewed-by or Acked-by that asks nothing, and for
+  a message that only thanks or closes the discussion.
+- Draft a reply when somebody is actually waiting on this person: a question,
+  a requested change, a disagreement, a request to resend, rebase, split or
+  retarget, or a request to confirm or test something.
+- If a message looks like a greeting with nothing after it, the rest of it is
+  in the quoted thread. Read the whole message before deciding it said
+  nothing.
 """
 
 
@@ -1177,6 +1199,94 @@ def find_working(p, key: str, avoid: str = "") -> tuple:
         if answer.ok:
             return model, tried
     return "", tried
+
+
+def thread_detail(email: str, msgid: str) -> dict:
+    """One patch, in full: the conversation, its versions, and where it
+    landed.
+
+    The page used to answer "what did they actually say" by sending people to
+    lore in another tab, which loses the version history and everything this
+    already knows.  So it is assembled here instead, and lore stays one click
+    away for anyone who wants the original.
+
+    The message id is checked against this person's own patches before
+    anything is fetched.  It arrives from a browser, and without that check
+    the endpoint would fetch any thread on lore for anybody who asked, and
+    cache it in this person's name."""
+    msgid = (msgid or "").strip()
+    if not msgid or len(msgid) > 400:
+        return {"ok": False, "error": "no message id"}
+
+    d = load_data(email)
+    if not d:
+        return {"ok": False, "error": "nothing collected yet"}
+
+    mine, family = None, []
+    for p in d.get("patches", []):
+        ids = [p.get("msgid")] + [v.get("msgid")
+                                  for v in p.get("versions") or []]
+        if msgid in [i for i in ids if i]:
+            mine = p
+            break
+    if mine is None:
+        # A series id rather than a message id: the thread list is keyed by
+        # series, and the cover letter it points at is not itself a patch.
+        for p in d.get("patches", []):
+            if p.get("series") == msgid:
+                mine = p
+                break
+    if mine is None:
+        # Not one of theirs.  Says the same thing for a message that does not
+        # exist and one that belongs to somebody else, so this cannot be used
+        # to find out what another account is tracking.
+        return {"ok": False, "error": "that is not one of your patches"}
+
+    for p in d.get("patches", []):
+        if p.get("series") == mine.get("series"):
+            family.append(p)
+    family.sort(key=lambda p: (p.get("seq") or 0))
+
+    thread, why = [], ""
+    rule = policy(email)
+    try:
+        import collect
+        with COLLECT_MODULE_LOCK:
+            collect.working_for(email, out_dir=home_of(email))
+            f = collect.Fetcher(CONFIG.get("cache_hours", 6))
+            raw = collect.fetch_thread(f, mine.get("msgid") or msgid)
+        for m in raw:
+            thread.append({
+                "who": m.get("name") or rule.address(m.get("addr") or ""),
+                "addr": rule.address(m.get("addr") or ""),
+                "date": m.get("date"),
+                "mine": bool(m.get("mine")),
+                "bot": bool(m.get("bot")),
+                "applied": bool(m.get("applied")),
+                "question": bool(m.get("question")),
+                "tags": [t.get("tag") for t in m.get("tags") or []],
+                "subject": m.get("subject"),
+                "body": rule.message(m.get("body") or ""),
+                "lore": "%s/all/%s/" % (CONFIG["lore"]["base"],
+                                        urllib.parse.quote(m.get("msgid") or "")),
+            })
+    except Exception as exc:
+        why = "lore would not answer (%s)" % str(exc)[:80]
+
+    thread.sort(key=lambda m: m.get("date") or "")
+    return {
+        "ok": True,
+        "why": why,
+        "patch": {k: mine.get(k) for k in (
+            "subject", "state", "state_detail", "version", "latest_version",
+            "date", "lore", "msgid", "tree_hint", "list", "landed", "tags",
+            "versions", "series_name", "in_mainline", "in_next", "pw_url",
+            "pw_state", "check", "reviewers")},
+        "series": [{k: p.get(k) for k in
+                    ("subject", "state", "seq", "msgid", "lore", "landed")}
+                   for p in family],
+        "thread": thread,
+    }
 
 
 # ------------------------------------------------------------------ handler
@@ -1389,6 +1499,8 @@ class Handler(BaseHTTPRequestHandler):
                 "ai_ready": ready,
                 "ai_count": len(ready),
             })
+        elif path == "/api/thread":
+            self.json_out(200, thread_detail(me, (q.get("id") or [""])[0]))
         elif path == "/api/ai/providers":
             self.json_out(200, {"ok": True, "providers": ai_catalogue(me),
                                 "ready": ai_ready(me),

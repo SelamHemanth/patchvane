@@ -230,8 +230,16 @@ TAG_RE = re.compile(r"^(%s):[ \t]*(.+?)\s*$" % "|".join(TAG_NAMES), re.M)
 
 TREE_WORD = r"(?:my\s+|our\s+|the\s+)?[\w./-]*(?:-next|tree|\.git|for-[\w.]+|queue)"
 
+# "Applied 1-2 to sched_ext/for-7.4" is the common shape: a maintainer names
+# which patches of a series they took, between the verb and the branch.  The
+# branch itself is not worth matching on -- it is whatever they called it,
+# and it is often nothing like "next".
+RANGE = (r"(?:[\s,]+(?:patch(?:es)?\s+)?\d+"
+         r"(?:\s*(?:[-,&]|to|and)\s*\d+)*)?")
+
 APPLIED_RE = re.compile(
-    r"(applied[,!.]?\s+thanks|applied\s+to\b|now applied|thanks,?\s+applied|"
+    r"(applied[,!.]?\s+thanks|applied" + RANGE + r"\s+to\b|now applied|"
+    r"thanks,?\s+applied|"
     r"has been applied|series applied|pushed to |queued (?:up )?for|"
     r"i(?:'ve| have) applied|^[ \t]*applied[.!]*[ \t]*$|"
     r"added\s+[^.\n]{0,28}?to\s+" + TREE_WORD + r"|"
@@ -244,6 +252,21 @@ APPLIED_RE = re.compile(
 NOT_APPLIED_RE = re.compile(
     r"\b(not|n't|cannot|can not|won't|unable|fails?|failed|failing|"
     r"does not|doesn)\b[^.\n]{0,24}$", re.I)
+
+
+# "Hi Hemanth," "Hello,", "Dear all:" -- an opening with nothing in it.
+GREETING_RE = re.compile(
+    r"^(hi|hello|hey|dear|greetings|good\s+(?:morning|afternoon|evening))"
+    r"\b[\s,.:!-]*[\w.'-]*(?:\s+[\w.'-]+)?[\s,.:!-]*$", re.I)
+
+
+def is_greeting(line: str) -> bool:
+    """A salutation and nothing else.
+
+    Word count as well as shape, because "Hi, this needs a rebase" opens the
+    same way and is the whole point of the message."""
+    s = line.strip()
+    return bool(GREETING_RE.match(s)) and len(s.split()) <= 3
 
 
 def says_applied(text: str) -> bool:
@@ -501,6 +524,11 @@ def _fetch_thread_once(f: Fetcher, msgid: str) -> list:
                 tags.append({"tag": tag, "who": who, "addr": addr_of(who),
                              "name": name_of(who)})
 
+        # The first line that carries any meaning.  A great many replies open
+        # with "Hi," or "Hello," on a line of their own, and an excerpt of
+        # "Hello," tells a reader nothing and tells the assistant less: the
+        # message that reads as an empty greeting on the page is usually
+        # "Applied 1-2 to sched_ext/for-7.4" one line further down.
         excerpt = ""
         for line in clean.splitlines():
             s = line.strip()
@@ -508,8 +536,17 @@ def _fetch_thread_once(f: Fetcher, msgid: str) -> list:
                 continue
             if re.match(r"^\w[\w .'-]*(wrote|writes):$", s):
                 continue
+            if is_greeting(s):
+                continue
             excerpt = s
             break
+        # Nothing but a greeting in the whole message: better to show it than
+        # to show nothing at all.
+        if not excerpt:
+            for line in clean.splitlines():
+                if line.strip():
+                    excerpt = line.strip()
+                    break
 
         commits = re.findall(r"\b([0-9a-f]{12,40})\b", clean[:6000])
         msgs.append({
@@ -1224,7 +1261,9 @@ def build(out: dict, brain=None) -> dict:
             "last_activity": max([m["date"] for m in thread if m["date"]]
                                  or [sent_at]),
             "ci": ci_verdict(bot_replies),
+            # Worked out again below, once the states have settled.
             "waiting_on_us": waiting_on_us(thread),
+            "_thread": thread,
         })
 
     patches.sort(key=lambda p: (p["date"] or ""), reverse=True)
@@ -1234,6 +1273,7 @@ def build(out: dict, brain=None) -> dict:
     if brain is not None:
         reread(brain, soft_cases(patches, evidence), patches, series_out)
     restate_series(patches, series_out)
+    settle_replies(series_out, brain)
 
     return assemble(out, patches, series_out, threads, tree_urls)
 
@@ -1365,6 +1405,37 @@ def restate_series(patches: list, series_out: list) -> None:
         if states:
             s["state"] = rollup(states)
             s["states"] = sorted(set(states))
+
+
+def settle_replies(series_out: list, brain=None) -> None:
+    """Whether a reply is owed, decided once the states are final.
+
+    This has to run after the model has read the threads, not before: the
+    regular expressions miss a phrasing, the model corrects the state to
+    accepted, and a thread that is plainly finished would otherwise still be
+    sitting in "your turn" telling somebody to write a thank-you note.
+
+    What the regular expressions still cannot read is handed to the model as
+    a question in its own right."""
+    unsure = []
+    for s in series_out:
+        thread = s.pop("_thread", [])
+        s["waiting_on_us"] = waiting_on_us(thread, s.get("state", ""))
+        if s["waiting_on_us"] and brain is not None:
+            unsure.append((s, thread))
+    if not unsure:
+        return
+    asked = brain.replies_needed([
+        {"subject": s["name"], "state": s.get("state", ""),
+         "thread": thread} for s, thread in unsure])
+    dropped = 0
+    for (s, _), verdict in zip(unsure, asked):
+        if verdict is False:
+            s["waiting_on_us"] = False
+            s["no_reply_wanted"] = True
+            dropped += 1
+    if dropped:
+        log("  a model read %d thread(s) as needing no reply" % dropped)
 
 
 def reread(brain, soft, patches, series_out) -> None:
@@ -1499,12 +1570,27 @@ def ci_verdict(bot_replies: list) -> str:
     return ""
 
 
-def waiting_on_us(thread: list) -> bool:
+# A state that says the patch got in.  Nothing the author writes now changes
+# it, so the thread is finished with them.
+SETTLED = {"merged", "in-next", "in-tree", "accepted", "superseded",
+           "rejected", "not-applicable", "handled-elsewhere"}
+
+
+def waiting_on_us(thread: list, state: str = "") -> bool:
     """True when the last word in the thread is a person wanting something.
 
-    A maintainer writing "applied, thanks" has closed the thread, and one who
-    only sends a Reviewed-by has said all they mean to say.  Neither needs an
-    answer, so neither counts."""
+    Kernel lists treat an unnecessary reply as noise.  "Thanks for applying"
+    costs every subscriber a message and tells the maintainer nothing they
+    did not already know, so the bar here is that somebody is actually
+    waiting on the author, not merely that they wrote last.
+
+    A settled state closes the thread whatever the prose looks like.  The
+    phrasing is not worth chasing: "Applied 1-2 to sched_ext/for-7.4" names a
+    branch with nothing like "next" in it, and the next maintainer will
+    phrase it a way nobody has thought of yet.  What is known is that the
+    patch got in, and once that is known the wording does not matter."""
+    if state in SETTLED:
+        return False
     msgs = sorted([m for m in thread if m["date"]], key=lambda m: m["date"])
     if not msgs:
         return False
@@ -1514,6 +1600,10 @@ def waiting_on_us(thread: list) -> bool:
     if not later:
         return False
     last = later[-1]
+    # Anyone in the thread saying they took it, not only the last speaker: a
+    # maintainer applies the series and somebody else comments afterwards.
+    if any(m["applied"] for m in later):
+        return False
     if last["applied"]:
         return False
     if last["tags"] and not last["question"]:
@@ -1575,6 +1665,10 @@ def assemble(out, patches, series, threads, tree_urls) -> dict:
             continue
         seen_commits[pick["commit"]] = row = {
             "subject": p["subject"],
+            # So the page can open the patch that became this commit rather
+            # than only linking out to it.
+            "msgid": p.get("msgid", ""),
+            "author": pick.get("author", ""),
             "commit": pick["commit"],
             "short": pick["short"],
             "url": pick["url"],

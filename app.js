@@ -9,6 +9,8 @@ const S = {
   status: {},
   tabs: {},
   chat: [],
+  /* The patch being read in full, if any. */
+  thread: null,
   /* Whose chat this is.  A conversation is about one person's patches and
      often quotes their reviewers, so it must not outlive their session. */
   chatWho: "",
@@ -225,7 +227,7 @@ function patchColumns() {
   return [
     { key: "subject", label: "Patch", cls: "subject", width: "44%",
       csv: (r) => r.subject,
-      render: (r) => `<a href="${esc(r.lore)}" target="_blank" rel="noreferrer">${mark(r.subject)}</a>
+      render: (r) => `${subj(r.msgid || r.series, r.subject)}
         ${r.version > 1 ? `<span class="tag">v${r.version}</span>` : ""}
         <div class="sub2">${mark(r.state_detail)}${byAI(r)}</div>` },
     { key: "tree", label: "Tree", sort: treeOf,
@@ -332,7 +334,7 @@ function viewOverview() {
   const attentionList = attention.slice(0, 5).map((t, i) => `
     <div class="attn" data-reveal style="--i:${i}">
       <div class="who">${esc(t.last_from)}<span class="when">${ago(t.last_date)}</span></div>
-      <a class="sj" href="${esc(t.lore)}" target="_blank" rel="noreferrer">${esc(t.series)}</a>
+      ${subj(t.id, t.series, "sj")}
       <p>${esc(t.excerpt)}</p>
     </div>`).join("") || `<div class="empty"><div class="emptyicon">\u2713</div>
       <p>Your inbox is clear. Nothing on the list needs an answer.</p></div>`;
@@ -536,8 +538,7 @@ function viewDropped(rows) {
     + grid("dropped", rows, [
       { key: "subject", label: "Patch", cls: "subject", width: "44%",
         csv: (r) => r.subject,
-        render: (r) => `<a href="${esc(r.lore)}" target="_blank" rel="noreferrer">${
-          mark(r.subject)}</a>${r.version > 1
+        render: (r) => `${subj(r.msgid || r.series, r.subject)}${r.version > 1
             ? `<span class="tag">v${r.version}</span>` : ""}` },
       { key: "state", label: "What happened", sort: (r) => state(r.state).rank,
         csv: (r) => state(r.state).label, render: (r) => pill(r.state) },
@@ -581,7 +582,7 @@ function viewLanded() {
         render: (r) => `<a href="${esc(r.url)}" target="_blank" rel="noreferrer">${mark(r.short)}</a>` },
       { key: "subject", label: "Subject", cls: "subject", width: "46%",
         csv: (r) => r.subject,
-        render: (r) => mark(r.subject) + (r.versions > 1
+        render: (r) => subj(r.msgid || r.series, r.subject) + (r.versions > 1
           ? `<span class="tag">${r.versions} versions</span>` : "")
           + (r.series && r.series !== r.subject
             ? `<div class="sub2">posted as: ${mark(r.series)}</div>` : "") },
@@ -620,7 +621,7 @@ function discThreads() {
   return grid("threads", S.data.threads, [
     { key: "series", label: "Thread", cls: "subject", width: "46%",
       csv: (r) => r.series,
-      render: (r) => `<a href="${esc(r.lore)}" target="_blank" rel="noreferrer">${mark(r.series)}</a>
+      render: (r) => `${subj(r.id || r.series, r.series)}
         <div class="sub2">${mark(r.excerpt)}</div>` },
     { key: "last_from", label: "Last word from", csv: (r) => r.last_from,
       render: (r) => `${mark(r.last_from)}<div class="sub2">${ago(r.last_date)}</div>` },
@@ -689,7 +690,7 @@ function discTags() {
       render: (r) => `${mark(r.who)}<div class="sub2">${esc(r.addr)}</div>` },
     { key: "subject", label: "On patch", cls: "subject", width: "42%",
       csv: (r) => r.subject,
-      render: (r) => `<a href="${esc(r.lore)}" target="_blank" rel="noreferrer">${mark(r.subject)}</a>` },
+      render: (r) => `${subj(r.msgid || r.series, r.subject)}` },
     { key: "state", label: "Now", sort: (r) => state(r.state).rank,
       csv: (r) => state(r.state).label, render: (r) => pill(r.state) },
     { key: "date", label: "Given",
@@ -962,7 +963,7 @@ function owedReplies(owed) {
     <div class="notecard" data-reveal style="--i:${i}">
       <span class="pill amber">reply</span>
       <div class="tx">
-        <h4><a href="${esc(t.lore)}" target="_blank" rel="noreferrer">${esc(t.series)}</a></h4>
+        <h4>${subj(t.id, t.series)}</h4>
         <p><strong>${esc(t.last_from)}</strong> wrote ${ago(t.last_date)}:
            ${esc(t.excerpt)}</p>
         <div class="next">
@@ -990,13 +991,12 @@ function owedRespins(owed) {
     <div class="notecard" data-reveal style="--i:${i}">
       <span class="pill purple">v${g.sent + 1} due</span>
       <div class="tx">
-        <h4><a href="${esc(g.lore)}" target="_blank" rel="noreferrer">${esc(g.name)}</a></h4>
+        <h4>${subj(g.id, g.name)}</h4>
         <p>${plural(g.patches.length, "patch", "patches")} with changes
            requested, last moved ${ago(g.date)}. You sent v${g.sent}, so the
            next one goes out as <strong>v${g.sent + 1}</strong>.</p>
         <ul class="tight">${g.patches.map((p) =>
-          `<li><a href="${esc(p.lore)}" target="_blank" rel="noreferrer">${
-            esc(p.subject)}</a>${p.state_detail
+          `<li>${subj(p.msgid || p.series, p.subject)}${p.state_detail
               ? ` <span class="muted">\u2014 ${esc(p.state_detail)}</span>` : ""}</li>`
           ).join("")}</ul>
         <div class="next">
@@ -1517,6 +1517,219 @@ function askAI(prompt) {
   } else {
     $("aiinput").focus();
   }
+}
+
+/* ------------------------------------------------- one patch, in full */
+
+/* Clicking a subject used to throw you at lore in another tab, which knows
+   nothing about the versions you sent, where it landed, or whether anybody
+   is waiting on you.  All of that is here, so show it here, and keep lore a
+   click away for the original. */
+function openThread(id, subject) {
+  S.thread = { id, subject, loading: true, data: null, error: "" };
+  $("thread").classList.add("open");
+  $("thscrim").classList.add("on");
+  drawThread();
+  fetch("/api/thread?id=" + encodeURIComponent(id),
+        { headers: { "X-Requested-With": "patchvane" } })
+    .then((r) => r.json())
+    .then((b) => {
+      if (!S.thread || S.thread.id !== id) return;   /* they moved on */
+      if (b.ok) S.thread.data = b;
+      else S.thread.error = b.error || "could not read that thread";
+      S.thread.loading = false;
+      drawThread();
+    })
+    .catch((e) => {
+      if (!S.thread || S.thread.id !== id) return;
+      S.thread.error = String(e.message || e);
+      S.thread.loading = false;
+      drawThread();
+    });
+}
+
+function closeThread() {
+  const d = $("thread");
+  const inside = d.contains(document.activeElement);
+  d.classList.remove("open");
+  $("thscrim").classList.remove("on");
+  S.thread = null;
+  if (inside) document.body.focus();
+}
+
+/* A subject that opens the patch here rather than leaving the page. */
+function subj(id, text, cls) {
+  return `<a class="${cls || ""}" href="#" ${act(openThread, id, text)}
+    >${mark(text)}</a>`;
+}
+
+function drawThread() {
+  const box = $("thbody");
+  const st = S.thread;
+  if (!st) return;
+  $("thtitle").textContent = st.subject || "Patch";
+  const lore = $("thlore");
+
+  if (st.loading) {
+    $("thsub").textContent = "reading the thread\u2026";
+    lore.style.display = "none";
+    box.innerHTML = `<div class="thwait"><span class="spin"></span>
+      Fetching the conversation from lore\u2026</div>`;
+    return;
+  }
+  if (st.error) {
+    $("thsub").textContent = "";
+    lore.style.display = "none";
+    box.innerHTML = `<div class="thwait">${esc(st.error)}</div>`;
+    return;
+  }
+
+  const b = st.data, p = b.patch || {}, msgs = b.thread || [];
+  lore.style.display = "";
+  lore.href = p.lore || "#";
+  $("thtitle").textContent = p.subject || st.subject || "Patch";
+  $("thsub").textContent = [p.tree_hint || p.list, state(p.state).label]
+    .filter(Boolean).join(" \u00b7 ");
+
+  box.innerHTML = whatsNeeded(p, msgs) + whereItLanded(p)
+    + versionHistory(p) + inThisSeries(b.series, p)
+    + conversation(msgs, b.why);
+}
+
+/* The question anybody opening a patch is actually asking. */
+function whatsNeeded(p, msgs) {
+  const landed = (p.landed || []).length > 0;
+  const last = [...msgs].reverse().find((m) => !m.mine && !m.bot);
+  const tookIt = msgs.find((m) => m.applied && !m.mine);
+  const ACCEPTED = ["accepted", "in-tree", "in-next", "merged", "queued",
+                    "awaiting-upstream"];
+  let head, note, cls;
+
+  if (p.in_mainline) {
+    head = "In mainline. Nothing to do.";
+    note = "It is in Linus' tree. The thread is finished with you.";
+    cls = "green";
+  } else if (landed || p.in_next || ACCEPTED.includes(p.state) || tookIt) {
+    /* Whoever said it, however they phrased it, and whatever they called
+       the branch. Replying "thanks for applying" is noise on a kernel
+       list, so the answer here is to do nothing. */
+    const who = tookIt ? tookIt.who : (last ? last.who : "");
+    head = p.in_next ? "Applied, and in linux-next. Nothing to do."
+                     : "Applied. Nothing to do.";
+    note = `${who ? esc(who) + " took this" : "A maintainer took this"}.
+      Kernel lists treat a thank-you reply as noise, so no answer is
+      expected. Watch for it in linux-next and then in mainline.`;
+    cls = "green";
+  } else if (p.state === "changes-requested") {
+    head = "A new version is owed.";
+    note = "Somebody asked for changes. Address them and send the next version.";
+    cls = "amber";
+  } else if (p.state === "superseded") {
+    head = "Replaced by a later version.";
+    note = "A newer version of this patch took over. Nothing to do here.";
+    cls = "grey";
+  } else if (p.state === "rejected") {
+    head = "Turned down.";
+    note = "A maintainer said no. Read the reason below before resending.";
+    cls = "red";
+  } else if (last && last.tags.length && !last.question) {
+    head = "Reviewed, waiting on a maintainer.";
+    note = `${esc(last.who)} gave ${last.tags.map(esc).join(", ")} and asked
+      nothing. Nothing is owed from you; it needs a maintainer to pick it up.`;
+    cls = "blue";
+  } else if (last) {
+    head = "Somebody is waiting on you.";
+    note = `${esc(last.who)} wrote last${last.question ? " and asked a question"
+      : ""}. Their message is below.`;
+    cls = "amber";
+  } else {
+    head = "Posted, nothing back yet.";
+    note = "No reply has come in. Give it a week or two before a ping.";
+    cls = "grey";
+  }
+  return `<div class="thneed ${cls}"><h3>${head}</h3><p>${note}</p></div>`;
+}
+
+function whereItLanded(p) {
+  const rows = p.landed || [];
+  if (!rows.length) return "";
+  return `<section class="thsec"><h3>The commit</h3>
+    <table class="thtable"><tbody>${rows.map((l) => `<tr>
+      <td class="thtree">${esc(l.tree)}</td>
+      <td><a href="${esc(l.url)}" target="_blank" rel="noreferrer"
+        ><code>${esc(l.short)}</code></a></td>
+      <td class="thdim">${l.author ? esc(l.author) : ""}</td>
+      <td class="thdim">${l.date ? esc(l.date.slice(0, 10)) : ""}</td>
+    </tr>`).join("")}</tbody></table></section>`;
+}
+
+function versionHistory(p) {
+  const vs = p.versions || [];
+  if (vs.length < 2) return "";
+  return `<section class="thsec"><h3>Versions you sent</h3>
+    <ol class="thvers">${vs.map((v) => `<li class="${
+      v.version === p.version ? "on" : ""}">
+      <b>v${esc(String(v.version))}</b>
+      <span class="thdim">${esc((v.date || "").slice(0, 10))}</span>
+      ${v.version === p.version ? '<span class="pill grey">this one</span>' : ""}
+      ${v.lore ? `<a href="${esc(v.lore)}" target="_blank"
+        rel="noreferrer">lore</a>` : ""}
+    </li>`).join("")}</ol></section>`;
+}
+
+function inThisSeries(rows, p) {
+  if (!rows || rows.length < 2) return "";
+  return `<section class="thsec"><h3>The rest of the series</h3>
+    <ul class="thseries">${rows.map((r) => `<li class="${
+      r.msgid === p.msgid ? "on" : ""}">
+      ${pill(r.state)}
+      ${esc(r.subject || "")}
+    </li>`).join("")}</ul></section>`;
+}
+
+function conversation(msgs, why) {
+  if (!msgs.length) {
+    return `<section class="thsec"><h3>The conversation</h3>
+      <p class="hint">${esc(why || "Nothing came back on this one yet.")}</p>
+      </section>`;
+  }
+  return `<section class="thsec"><h3>The conversation
+    <span class="thdim">${msgs.length} message${msgs.length > 1 ? "s" : ""}</span>
+    </h3>
+    ${why ? `<p class="hint">${esc(why)}</p>` : ""}
+    <div class="thmsgs">${msgs.map((m) => `<article class="thmsg${
+      m.mine ? " mine" : ""}${m.bot ? " bot" : ""}">
+      <header>
+        <b>${esc(m.who || "somebody")}</b>
+        ${m.mine ? '<span class="pill grey">you</span>' : ""}
+        ${m.bot ? '<span class="pill grey">bot</span>' : ""}
+        ${m.applied ? '<span class="pill green">applied it</span>' : ""}
+        ${(m.tags || []).map((t) => `<span class="pill blue">${esc(t)}</span>`).join("")}
+        <span class="spacer"></span>
+        <span class="thdim">${esc(ago(m.date))}</span>
+        ${m.lore ? `<a href="${esc(m.lore)}" target="_blank"
+          rel="noreferrer" title="this message on lore">\u2197</a>` : ""}
+      </header>
+      <pre>${esc(trimQuotes(m.body || ""))}</pre>
+    </article>`).join("")}</div></section>`;
+}
+
+/* A reply that quotes the whole patch back is mostly the patch.  Keep the
+   short quotes, which are the thing being answered, and fold the rest. */
+function trimQuotes(body) {
+  const out = [];
+  let run = 0;
+  for (const line of body.split("\n")) {
+    if (line.startsWith(">")) {
+      run++;
+      if (run <= 6) out.push(line);
+      else if (run === 7) out.push("\u2026");
+      continue;
+    }
+    run = 0;
+    out.push(line);
+  }
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 function openAI() {
@@ -2105,6 +2318,7 @@ function keys(e) {
   const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
   if (e.key === "Escape") {
     if ($("help").classList.contains("on")) { $("help").classList.remove("on"); return; }
+    if ($("thread").classList.contains("open")) { closeThread(); return; }
     if ($("ai").classList.contains("open")) { closeAI(); return; }
     if (typing) e.target.blur();
     return;
@@ -2134,6 +2348,8 @@ async function boot() {
   $("aiclose").addEventListener("click", closeAI);
   $("ainew").addEventListener("click", newChat);
   $("aiscrim").addEventListener("click", closeAI);
+  $("thclose").addEventListener("click", closeThread);
+  $("thscrim").addEventListener("click", closeThread);
   $("aisend").addEventListener("click", sendAI);
   $("helpopen").addEventListener("click", () => $("help").classList.add("on"));
   $("helpclose").addEventListener("click", () => $("help").classList.remove("on"));
