@@ -178,6 +178,25 @@ about that one hash instead, which is a single fast request.
 `--standalone` writes `dashboard.html` with the data baked in, openable with no
 server and no sign-in. Treat that file as public.
 
+### When a collection comes back empty
+
+A step that fails is recorded and the run carries on, so that patchwork being
+down does not cost you what the other two had to say. The price is that a run
+which could not read a single message still finishes and still writes a file,
+and that file is a dashboard of zeros with an honest timestamp on it. The
+overview says so when it happens, naming the part that failed.
+
+Behind a proxy or a filtered network that is usually the whole story, and this
+asks the same hosts the same way the collector does:
+
+```bash
+python3 netcheck.py
+```
+
+If it cannot reach `lore.kernel.org`, no amount of collecting will fill the
+page. Note that a refusal is remembered for the life of the cache entry, so
+after fixing the network, clear it: `rm -rf cache/`.
+
 ## The assistant
 
 **Settings → Assistant** lists every model the dashboard can talk to. Add an
@@ -486,6 +505,8 @@ config.json   what to collect
 providers.py  the models the assistant can use, and the failover between them
 aiclass.py    asks a model about threads the regular expressions could not read
 vault.py      per-person secrets, encrypted where they sit
+netcheck.py   can this machine read the archives? run it when a collection
+              comes back empty
 requirements.txt  empty on purpose: the standard library is the whole of it
 cache/        fetched responses, safe to delete
 people/       one directory per signed-in address: their patches, their notes
