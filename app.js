@@ -341,20 +341,36 @@ function viewOverview() {
 
   const feed = d.activity.slice(0, 7).map(feedItem).join("");
 
-  /* A collection that cannot reach the archives still finishes and still
-     writes a file, so a blocked network or a proxy arrives here as a
-     confident zero. Say what was refused, rather than letting the page
-     report that you have posted nothing. */
-  const missed = ((d.sources || {}).cache || {}).errors || 0;
-  const shortfall = !missed ? "" : `
+  /* A step that fails is recorded and the run carries on, so a collection
+     that could not read a single message still writes a file and still
+     arrives here as a confident zero. Say which part failed and why,
+     rather than letting the page report that you have posted nothing. */
+  const SOURCE = {
+    lore: ["Reading the mailing lists", "lore.kernel.org"],
+    patchwork: ["Checking patchwork", "patchwork.kernel.org"],
+    korg: ["Looking through the trees", "git.kernel.org"],
+  };
+  const src = d.sources || {};
+  const broke = Object.keys(SOURCE).filter(
+    (n) => src[n] && src[n].ok === false && src[n].error !== "skipped");
+  const missed = (src.cache || {}).errors || 0;
+
+  const shortfall = !broke.length && !missed ? "" : `
   <div class="panel warn" data-reveal><div class="body">
-    <strong>${plural(missed, "request")} to the archives did not come back.</strong>
+    ${broke.length ? `<strong>${broke.map((n) => SOURCE[n][0]).join(", ")}
+      did not work on the last collection.</strong>
+      ${broke.map((n) => esc(String(src[n].error || "no reason given")))
+             .join("; ")}.`
+      : `<strong>${plural(missed, "request")} to the archives did not come
+         back.</strong>`}
     ${k.patches
       ? " Some of what is below may be missing or out of date."
       : " That is why there is nothing below: this is a collection that "
         + "could not read your patches, not an answer about them."}
-    <span class="muted"> Check that this machine can reach lore.kernel.org
-    and git.kernel.org, then collect again.</span>
+    <span class="muted"> Check that this machine can reach
+    ${broke.length ? broke.map((n) => SOURCE[n][1]).join(" and ")
+                   : "lore.kernel.org and git.kernel.org"},
+    through a proxy if this network needs one, then collect again.</span>
   </div></div>`;
 
   return `
