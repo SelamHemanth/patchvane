@@ -2041,7 +2041,7 @@ function go(view) {
   if (content) content.scrollTo({ top: 0, behavior: MOTION.ok ? "smooth" : "auto" });
 }
 
-function signOut() { location.href = "/logout"; }
+function signOut() { snapDrop(); location.href = "/logout"; }
 
 /* Start again, with nothing carried over: the whole conversation goes to the
    model with every question, so an old thread is not just clutter on screen,
@@ -2060,6 +2060,9 @@ function chatBelongsToMe() {
   if (S.chatWho && S.chatWho !== who) {
     S.chat = [];
     S.asking = false;
+    /* Somebody else is signed in now; the page kept for the last one goes
+       with their conversation. */
+    snapDrop();
   }
   S.chatWho = who;
 }
@@ -2162,6 +2165,52 @@ function showWho(email) {
 
 /* ------------------------------------------------------------------ data */
 
+/* The last page this browser was shown, so a sign-in opens on the dashboard
+   instead of on nothing while a megabyte of JSON is on its way.
+
+   localStorage belongs to the browser profile rather than to whoever is
+   signed in, and it outlives the session, so a snapshot is kept under the
+   address it was collected for and thrown away on the way out and on any
+   change of account. Two people sharing a machine must not find each
+   other's patches in here. It is only ever a head start: what the server
+   says replaces it as soon as it arrives. */
+const SNAP = "patchvane:snapshot:";
+
+function snapDrop() {
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (k && k.indexOf(SNAP) === 0) localStorage.removeItem(k);
+    }
+  } catch (e) { /* storage turned off: there is nothing to drop */ }
+}
+
+function snapSave(who, data) {
+  if (!who || !data) return;
+  try {
+    localStorage.setItem(SNAP + who, JSON.stringify(data));
+  } catch (e) {
+    /* Over quota, or storage refused. This is an optimisation and nothing
+       depends on it, so clear out rather than leave half a page behind. */
+    snapDrop();
+  }
+}
+
+function snapLoad(who) {
+  if (!who) return null;
+  try {
+    const raw = localStorage.getItem(SNAP + who);
+    if (!raw) return null;
+    const d = JSON.parse(raw);
+    /* Only this person's, and only if it still looks like a dashboard:
+       the shape changes between versions and a half-read one would throw
+       somewhere deep in a view. */
+    return d && d.profile && d.kpis && d.threads ? d : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 async function load() {
   const r = await fetch("data.json?t=" + Date.now(), { cache: "no-store" });
   if (r.status === 401) { location.href = "/login"; return false; }
@@ -2169,11 +2218,15 @@ async function load() {
     /* Signed in, but nothing collected for this person yet.  On a first
        sign-in that is normal and already being worked on. */
     const body = await r.json().catch(() => ({}));
+    /* The server has nothing for this person, so a snapshot of theirs is
+       no longer true. */
+    snapDrop();
     firstRun(body.who || "", body.collecting);
     return false;
   }
   if (!r.ok) throw new Error("Could not read the collected patches.");
   S.data = await r.json();
+  snapSave((S.status && S.status.who) || (S.data.profile || {}).email, S.data);
   return true;
 }
 
@@ -2412,10 +2465,25 @@ async function boot() {
   await pollStatus();
   if (!S.offline) await loadProviders();
 
+  /* Put the last known page up straight away, before asking for a fresh
+     one, so signing in lands on the dashboard rather than on a spinner. */
+  const cached = S.offline ? null : snapLoad((S.status && S.status.who) || "");
+  if (cached) {
+    S.data = cached;
+    S.view = location.hash.replace("#", "") || "overview";
+    render();
+    $("bar").classList.add("hidden");
+  }
+
   try {
     if (S.offline) S.data = window.__DATA__;
     else if (!(await load())) return;
   } catch (e) {
+    /* A snapshot on screen is better than replacing it with an error. */
+    if (cached) {
+      toast("Showing the last page saved in this browser.");
+      return;
+    }
     $("view").innerHTML = `<div class="panel"><div class="empty">
       <div class="emptyicon">\u23F3</div><p>${esc(e.message)}</p></div></div>`;
     $("bar").classList.add("hidden");
