@@ -1,6 +1,10 @@
 .env
 secrets.json
 
+# Written by run.sh for the server it backgrounds.
+.patchvane.pid
+patchvane.log
+
 # One directory per person who signed in: their collected patches and their
 # notes.  Nobody else's business, and rebuilt from public archives anyway.
 people/

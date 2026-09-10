@@ -1,16 +1,109 @@
 #!/bin/bash
-# Start the dashboard.  From a fresh clone this is the only command needed:
+# Start and stop the dashboard.
 #
-#     ./run.sh
+#     ./run.sh              start it, in the background, and give the
+#                           prompt back
+#     ./run.sh --stop       stop it
+#     ./run.sh --restart    stop it and start it again
+#     ./run.sh --status     say whether it is running, and where
+#     ./run.sh --log        follow the log
+#     ./run.sh --fg         run in this terminal instead, Ctrl-C to stop
 #
-# It checks the interpreter, writes a .env from the template if there is
-# none, generates the session secret the first time, installs anything
-# requirements.txt asks for, and starts the server.  Settings are read from
-# .env, so nothing sensitive and nobody's address lives in this file.
+# A first start also writes .env from .env.example, generates the session
+# secret, checks the interpreter and installs anything requirements.txt
+# asks for, so a fresh clone needs nothing but ./run.sh.  Settings live in
+# .env, so nothing sensitive and nobody's address is in this file.
 set -e
 cd "$(dirname "$0")"
 
 PY="${PYTHON:-python3}"
+PIDFILE=.patchvane.pid
+LOGFILE=patchvane.log
+
+# The pid of a live server, or nothing.  A pidfile left behind by a machine
+# that lost power names a pid that is gone, or worse one that something else
+# is now using, so check the process is really ours before believing it.
+live_pid() {
+  local pid
+  [ -f "$PIDFILE" ] || return 1
+  pid=$(cat "$PIDFILE" 2>/dev/null) || return 1
+  case "$pid" in "" | *[!0-9]*) return 1 ;; esac
+  kill -0 "$pid" 2>/dev/null || return 1
+  case "$(ps -p "$pid" -o args= 2>/dev/null)" in
+    *serve.py*) printf '%s\n' "$pid" ;;
+    *) return 1 ;;
+  esac
+}
+
+where() {
+  . ./.env 2>/dev/null || true
+  printf 'http://%s:%s/\n' "${PATCHVANE_HOST:-127.0.0.1}" \
+                           "${PATCHVANE_PORT:-8787}"
+}
+
+stop_it() {
+  local pid
+  if ! pid=$(live_pid); then
+    rm -f "$PIDFILE"
+    echo "Patchvane is not running."
+    return 0
+  fi
+  kill "$pid" 2>/dev/null || true
+  # Give it a moment to close the socket, then insist.  Without the wait a
+  # restart can find the port still held by the process it just asked to go.
+  local i
+  for i in $(seq 1 50); do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.1
+  done
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -9 "$pid" 2>/dev/null || true
+    sleep 0.3
+  fi
+  rm -f "$PIDFILE"
+  echo "Stopped Patchvane (pid $pid)."
+}
+
+case "${1:-}" in
+  --stop | stop)
+    stop_it
+    exit 0
+    ;;
+  --status | status)
+    if pid=$(live_pid); then
+      echo "Patchvane is running (pid $pid) on $(where)"
+    else
+      echo "Patchvane is not running."
+      exit 1
+    fi
+    exit 0
+    ;;
+  --log | log)
+    [ -f "$LOGFILE" ] || { echo "No $LOGFILE yet."; exit 1; }
+    exec tail -f "$LOGFILE"
+    ;;
+  --restart | restart)
+    stop_it
+    ;;
+  --fg | -f | --stop-after) ;;
+  "" ) ;;
+  -h | --help | help)
+    sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
+    exit 0
+    ;;
+  *)
+    echo "Unknown option: $1" >&2
+    echo "Try: ./run.sh --help" >&2
+    exit 1
+    ;;
+esac
+
+if pid=$(live_pid); then
+  echo "Patchvane is already running (pid $pid) on $(where)"
+  echo "  ./run.sh --restart   to pick up a change"
+  echo "  ./run.sh --stop      to stop it"
+  exit 0
+fi
 
 if ! command -v "$PY" >/dev/null 2>&1; then
   echo "No $PY on PATH. Patchvane needs Python 3.10 or later." >&2
@@ -76,4 +169,33 @@ HOST="${PATCHVANE_HOST:-${MAINLINE_HOST:-127.0.0.1}}"
 PORT="${PATCHVANE_PORT:-${MAINLINE_PORT:-8787}}"
 INTERVAL="${PATCHVANE_INTERVAL:-${MAINLINE_INTERVAL:-30}}"
 
-exec "$PY" serve.py --host "$HOST" --port "$PORT" --interval "$INTERVAL"
+if [ "${1:-}" = "--fg" ] || [ "${1:-}" = "-f" ]; then
+  exec "$PY" serve.py --host "$HOST" --port "$PORT" --interval "$INTERVAL"
+fi
+
+# Background by default: this is a dashboard somebody leaves running, and
+# holding the terminal for it only means the terminal cannot be used.
+: > "$LOGFILE"
+nohup "$PY" serve.py --host "$HOST" --port "$PORT" --interval "$INTERVAL" \
+      >> "$LOGFILE" 2>&1 &
+pid=$!
+printf '%s\n' "$pid" > "$PIDFILE"
+
+# Confirm it is really up rather than reporting a pid that has already died
+# on a port in use or a bad config.
+for i in $(seq 1 40); do
+  kill -0 "$pid" 2>/dev/null || break
+  grep -q "listening on" "$LOGFILE" 2>/dev/null && break
+  sleep 0.1
+done
+
+if ! kill -0 "$pid" 2>/dev/null; then
+  rm -f "$PIDFILE"
+  echo "Patchvane did not start:" >&2
+  sed 's/^/  /' "$LOGFILE" >&2
+  exit 1
+fi
+
+echo "Patchvane is running (pid $pid) on http://$HOST:$PORT/"
+echo "  ./run.sh --log     follow the log ($LOGFILE)"
+echo "  ./run.sh --stop    stop it"

@@ -21,6 +21,18 @@ That is the whole of it, on a fresh clone. `run.sh` writes a `.env` from
 cookie, and starts the server. Nothing to copy, edit or generate by hand, and
 running it again reuses what the first run wrote.
 
+It starts in the background and gives the prompt back, because this is a
+dashboard you leave running and holding a terminal open for it only costs you
+the terminal.
+
+```bash
+./run.sh --status     is it running, and where
+./run.sh --log        follow the log
+./run.sh --restart    pick up a change
+./run.sh --stop       stop it
+./run.sh --fg         run in this terminal instead, Ctrl-C to stop
+```
+
 There is no install step either. `requirements.txt` is there and lists
 nothing, because the whole of this runs on the Python standard library: no
 requests, no web framework, no crypto library. `run.sh` installs from it only
