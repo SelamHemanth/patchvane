@@ -31,6 +31,8 @@ import html as htmllib
 import json
 import os
 import re
+import socket
+import ssl
 import sys
 import threading
 import time
@@ -190,10 +192,39 @@ class Fetcher:
         self.errors = 0
         self.stale_hits = 0
         self.stale_urls = set()
+        # Why fetches failed, most common first.  Without this the reason
+        # is thrown away here and the caller can only say that it got
+        # nothing back, which is the symptom and never the thing to fix.
+        self.why = Counter()
         os.makedirs(CACHE, exist_ok=True)
 
     def _path(self, url: str) -> str:
         return os.path.join(CACHE, hashlib.sha1(url.encode()).hexdigest())
+
+    def explain(self) -> str:
+        """The most common reason fetches failed, in a few words."""
+        if not self.why:
+            return ""
+        reason, n = self.why.most_common(1)[0]
+        return "%s (%d %s)" % (reason, n, "request" if n == 1 else "requests")
+
+    @staticmethod
+    def _reason(exc: Exception) -> str:
+        """One short line naming what went wrong, and what to do about it."""
+        if isinstance(exc, urllib.error.URLError):
+            exc = exc.reason if isinstance(exc.reason, Exception) else exc
+        if isinstance(exc, ssl.SSLCertVerificationError):
+            return ("the TLS certificate could not be verified: %s. This "
+                    "machine does not trust whoever signed it, so nothing "
+                    "can be read. Run python3 netcheck.py"
+                    % (exc.verify_message or "no issuer found"))
+        if isinstance(exc, ssl.SSLError):
+            return "TLS failed: %s" % exc
+        if isinstance(exc, socket.gaierror):
+            return "the name could not be resolved: %s" % exc
+        if isinstance(exc, socket.timeout):
+            return "timed out"
+        return "%s: %s" % (type(exc).__name__, exc)
 
     def get(self, url: str, timeout: int = 180, ttl: float | None = None,
             binary: bool = False, retries: int = 4):
@@ -227,6 +258,7 @@ class Fetcher:
             return blob if binary else blob.decode("utf-8", "replace")
 
         delay = 1.0
+        reason = "no answer"
         for attempt in range(retries):
             req = urllib.request.Request(url, headers={"User-Agent": UA})
             try:
@@ -250,11 +282,25 @@ class Fetcher:
                     delay *= 2
                     continue
                 self.errors += 1
+                self.why[self._reason(exc)] += 1
                 return stale()
-            except Exception:
+            except Exception as exc:
+                # A certificate this machine cannot verify will not verify
+                # on the fourth attempt either, and backing off through
+                # four of them turns one wrong answer into a minute of
+                # waiting for every URL.
+                reason = self._reason(exc)
+                if isinstance(getattr(exc, "reason", exc),
+                              ssl.SSLCertVerificationError):
+                    self.errors += 1
+                    self.why[reason] += 1
+                    return stale()
+                if attempt == retries - 1:
+                    break
                 time.sleep(delay)
                 delay *= 2
         self.errors += 1
+        self.why[reason] += 1
         return stale()
 
     def head_ok(self, url: str, ttl: float | None = None) -> bool:
@@ -713,7 +759,9 @@ def merge_stems(stems: dict) -> list:
 def collect_lore(f: Fetcher, out: dict) -> None:
     posts = lore_search(f, out)
     if not posts:
-        raise RuntimeError("lore returned nothing")
+        # Why it returned nothing is the whole question, and the reason
+        # was two frames down inside the fetcher.
+        raise RuntimeError(f.explain() or "lore returned nothing")
 
     def stem(msgid: str):
         m = re.match(r"^(\d{8,17}\.\d+)-\d+-", msgid)
