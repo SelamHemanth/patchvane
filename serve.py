@@ -537,21 +537,53 @@ def run_collect(email: str, full: bool = False, why: str = "manual") -> tuple:
         COLLECT_LOCK.release()
 
 
-def start_first_collection(email: str) -> None:
+def start_first_collection(email: str, why: str = "first sign-in") -> None:
     """Collect for somebody who has just signed in for the first time.
 
     In the background: a first collection reads a few hundred threads and
     takes minutes, and nobody should watch a blank page for that long."""
-    if state_of(email).get("running"):
+    state = state_of(email)
+    if state.get("running"):
         return
+    # Stamped before the thread starts, so a collection that dies early
+    # still counts as an attempt and the backoff below holds.
+    state["last_attempt"] = time.time()
 
     def go():
-        ok, summary = run_collect(email, why="first sign-in")
+        ok, summary = run_collect(email, why=why)
         if not ok:
             log("first collection for %s did not finish: %s"
                 % (quiet_addr(email), summary))
 
     threading.Thread(target=go, daemon=True).start()
+
+
+# A collection that fails in seconds must not be restarted by every poll of
+# an empty page, so leave a failed one alone for this long.
+EMPTY_RETRY = 300.0
+
+
+def ensure_collecting(email: str, why: str = "empty dashboard") -> bool:
+    """Start collecting for somebody who has nothing to look at yet.
+
+    The kick at sign-in covers a first visit, but not a session that
+    outlived a restart: the cookie is still good and the run state is not,
+    so the page would sit empty until the timer came round.
+
+    collect.py writes data.json only once it has finished, so a file that
+    is there at all means a run completed, even if it found no patches for
+    that address.  That is a real answer and not something to collect
+    again.  Returns whether a collection is under way."""
+    state = state_of(email)
+    if state.get("running"):
+        return True
+    if os.path.exists(data_path(email)):
+        return False
+    since = time.time() - (state.get("last_attempt") or 0)
+    if since < EMPTY_RETRY:
+        return False
+    start_first_collection(email, why)
+    return True
 
 
 def due_for_collection() -> list:
@@ -1471,9 +1503,12 @@ class Handler(BaseHTTPRequestHandler):
             if not d:
                 # Nothing collected for this person yet: say so plainly, and
                 # say whether it is being worked on, so the page can wait
-                # rather than showing an error.
+                # rather than showing an error.  A session that outlived a
+                # restart lands here too, so make sure something is running.
+                busy = ensure_collecting(me, why="empty dashboard")
                 self.json_out(404, {"ok": False, "error": "no data yet",
-                                    "collecting": run.get("running", False),
+                                    "collecting": busy,
+                                    "last_error": run.get("last_error", ""),
                                     "who": me})
             else:
                 self.send(200, json.dumps(d).encode(), "application/json")
@@ -1572,11 +1607,10 @@ class Handler(BaseHTTPRequestHandler):
                 return
             log("signed in from %s as %s" % (self.client_ip(), quiet_addr(who)))
             remember_person(who)
-            if not os.path.exists(data_path(who)):
-                # Nothing collected for them yet.  Start now, in the
-                # background, so the page can open and say what is happening
-                # instead of hanging on a first collection.
-                start_first_collection(who)
+            # Nothing collected for them yet.  Start now, in the background,
+            # so the page can open and say what is happening instead of
+            # hanging on a first collection.
+            ensure_collecting(who, why="first sign-in")
             self.redirect("/", [self.set_cookie(new_session(who))])
             return
 
