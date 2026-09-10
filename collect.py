@@ -88,6 +88,95 @@ def log(msg: str) -> None:
 
 
 # --------------------------------------------------------------------------
+# saying how far along this is
+# --------------------------------------------------------------------------
+#
+# A first collection is minutes of reading, and whoever is waiting on it
+# deserves better than a spinner.  This runs as its own process, so the
+# server watching it sees only an exit code; the state goes in a small file
+# next to the collected data instead, and the server serves it from there.
+#
+# The weights are how long each stage takes in a typical run, not how much
+# it matters.  They only exist so the bar moves at a roughly even pace
+# instead of sitting at 5% and then jumping to done.
+
+STAGES = [
+    ("start",     "Getting ready",                    0.01),
+    ("lore",      "Reading the mailing lists",        0.55),
+    ("patchwork", "Checking patchwork",               0.04),
+    ("korg",      "Checking mainline and linux-next", 0.18),
+    ("probe",     "Looking through the trees",        0.12),
+    ("ai",        "Reading the replies",              0.08),
+    ("write",     "Putting the page together",        0.02),
+]
+
+_STAGE_AT = {}
+_at = 0.0
+for _name, _label, _weight in STAGES:
+    _STAGE_AT[_name] = (_at, _weight, _label)
+    _at += _weight
+
+_progress = {"stage": "start", "done": 0, "total": 0, "note": ""}
+_progress_written = 0.0
+_progress_high = 0
+
+
+def progress(stage: str = None, done: int = None, total: int = None,
+             note: str = None, force: bool = False) -> None:
+    """Record how far along this collection is, for whoever is waiting."""
+    global _progress_written, _progress_high
+    with _print_lock:
+        if stage is not None and stage != _progress["stage"]:
+            _progress.update(stage=stage, done=0, total=0, note="")
+            force = True
+        if done is not None:
+            _progress["done"] = done
+        if total is not None:
+            _progress["total"] = total
+        if note is not None:
+            _progress["note"] = note
+
+        # The thread loop calls this once per thread; the file is worth
+        # rewriting a couple of times a second and no more.
+        now = time.time()
+        if not force and now - _progress_written < 0.5:
+            return
+        _progress_written = now
+
+        base, weight, label = _STAGE_AT.get(_progress["stage"],
+                                            (0.0, 0.0, "Working"))
+        total_n = _progress["total"] or 0
+        share = (_progress["done"] / total_n) if total_n else 0.0
+        # A bar that goes backwards reads as a mistake, and a stage whose
+        # size is only known once it starts would do exactly that.
+        _progress_high = max(
+            _progress_high,
+            round(min(1.0, base + weight * min(1.0, share)) * 100))
+        blob = {
+            "stage": _progress["stage"],
+            "label": label,
+            "done": _progress["done"],
+            "total": total_n,
+            "note": _progress["note"],
+            "percent": _progress_high,
+            "at": now,
+        }
+
+    if not OUT_DIR:
+        return
+    try:
+        path = os.path.join(OUT_DIR, "progress.json")
+        tmp = path + ".new"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(blob, fh)
+        os.replace(tmp, path)
+    except OSError:
+        # Nothing depends on this being written; the collection matters and
+        # the bar does not.
+        pass
+
+
+# --------------------------------------------------------------------------
 # fetching, with a cache so a refresh only pays for what changed
 # --------------------------------------------------------------------------
 
@@ -659,6 +748,7 @@ def collect_lore(f: Fetcher, out: dict) -> None:
                 sys.stderr.write("\r[collect] lore threads %d/%d"
                                  % (done[0], len(keys)))
                 sys.stderr.flush()
+        progress("lore", done[0], len(keys), "reading threads")
         return k, msgs
 
     with futures.ThreadPoolExecutor(
@@ -959,11 +1049,13 @@ def collect_korg(f: Fetcher, out: dict, quick: bool = False,
                  dict(all_trees, **sweep).items()}
     landed = defaultdict(dict)          # tree -> subject key -> commit
 
-    for name, path in sweep.items():
+    for i, (name, path) in enumerate(sweep.items()):
+        progress("korg", i, len(sweep), name)
         rows = cgit_author_log(f, base, path, mine)
         log("git.kernel.org: %-12s %d commits" % (name, len(rows)))
         for r in rows:
             landed[name].setdefault(r["key"], r)
+    progress("korg", len(sweep), len(sweep), "")
 
     # Hashes we already know about, from patchwork and from maintainers who
     # replied with one.  Patchwork is asked for this person's submissions by
@@ -1018,6 +1110,7 @@ def collect_korg(f: Fetcher, out: dict, quick: bool = False,
                 jobs.append((key, sha, tree))
 
     probed = 0
+    progress("probe", 0, len(jobs), "")
     if jobs:
         def probe(job):
             key, sha, tree = job
@@ -1027,6 +1120,7 @@ def collect_korg(f: Fetcher, out: dict, quick: bool = False,
         with futures.ThreadPoolExecutor(cfg.get("workers", 3)) as ex:
             for (key, sha, tree), hit in ex.map(probe, jobs):
                 probed += 1
+                progress("probe", probed, len(jobs), tree)
                 if hit:
                     landed[tree].setdefault(key, {
                         "commit": sha, "subject": "", "key": key, "date": "",
@@ -1046,6 +1140,7 @@ def collect_korg(f: Fetcher, out: dict, quick: bool = False,
                 done[0] += 1
                 log("git.kernel.org %d/%d %-14s %d commits"
                     % (done[0], len(rest), name, len(rows)))
+            progress("probe", done[0], len(rest), name)
             return name, rows
 
         with futures.ThreadPoolExecutor(cfg.get("workers", 3)) as ex:
@@ -1940,6 +2035,7 @@ def main() -> int:
         log("no address to collect for: pass --for someone@example.com")
         return 2
     log("collecting for %s" % ME)
+    progress("start", note="starting", force=True)
 
     wanted = args or {"lore", "patchwork", "korg"}
 
@@ -1957,6 +2053,7 @@ def main() -> int:
         if name not in wanted:
             out["sources"][name] = {"ok": False, "error": "skipped"}
             continue
+        progress(name, force=True)
         try:
             fn()
         except Exception as exc:
@@ -1995,7 +2092,9 @@ def main() -> int:
             log=log,
             limit=int(cfg.get("classify_limit", 200)))
 
+    progress("ai" if brain is not None else "write", force=True)
     data = build(out, brain)
+    progress("write", force=True)
     if brain is not None:
         # A run that answered everything from the cache asked nothing and
         # still used a model's reading, so the two are counted apart.
@@ -2024,6 +2123,13 @@ def main() -> int:
         json.dump(data, fh, ensure_ascii=False, indent=1)
     log("wrote %s (%.0f KB) in %ss"
         % (path, os.path.getsize(path) / 1024, data["collect_seconds"]))
+
+    # The page is written, so there is nothing left to be waiting for.  The
+    # server clears this too, in case this process never got here.
+    try:
+        os.remove(os.path.join(OUT_DIR, "progress.json"))
+    except OSError:
+        pass
 
     # dashboard.html carries the data inside it and answers to nobody, so it
     # is only written when it is asked for

@@ -115,6 +115,35 @@ def data_path(email: str) -> str:
     return os.path.join(home_of(email), "data.json")
 
 
+def progress_path(email: str) -> str:
+    return os.path.join(home_of(email), "progress.json")
+
+
+def progress_of(email: str) -> dict:
+    """How far along this person's collection is, if one is running.
+
+    collect.py runs as its own process and writes this as it goes, because
+    all this side of it can see otherwise is an exit code."""
+    try:
+        with open(progress_path(email), encoding="utf-8") as fh:
+            blob = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    # A collector that was killed leaves its last word behind.  Treat one
+    # nobody has touched in five minutes as gone, rather than showing a bar
+    # that will never move again.
+    if time.time() - float(blob.get("at") or 0) > 300:
+        return {}
+    return blob
+
+
+def clear_progress(email: str) -> None:
+    try:
+        os.remove(progress_path(email))
+    except OSError:
+        pass
+
+
 def known_people() -> list:
     """Everyone this server has collected for, newest first.
 
@@ -534,6 +563,9 @@ def run_collect(email: str, full: bool = False, why: str = "manual") -> tuple:
         return False, "The collector could not be started."
     finally:
         state["running"] = False
+        # Whether it finished or died, nothing is in progress now, and a
+        # file left behind would leave a bar on screen for ever.
+        clear_progress(email)
         COLLECT_LOCK.release()
 
 
@@ -1508,6 +1540,7 @@ class Handler(BaseHTTPRequestHandler):
                 busy = ensure_collecting(me, why="empty dashboard")
                 self.json_out(404, {"ok": False, "error": "no data yet",
                                     "collecting": busy,
+                                    "progress": progress_of(me),
                                     "last_error": run.get("last_error", ""),
                                     "who": me})
             else:
@@ -1519,6 +1552,7 @@ class Handler(BaseHTTPRequestHandler):
                 "ok": True,
                 "mode": MODE,
                 "running": run["running"],
+                "progress": progress_of(me),
                 "auto": STATE["auto"],
                 "interval": STATE["interval"],
                 "next_run": STATE["next_run"],

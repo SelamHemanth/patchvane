@@ -1130,6 +1130,21 @@ button.link.sm { font-size: 11px; margin-left: 6px; }
   border: 3px solid var(--line); border-top-color: var(--blue);
   animation: spin 900ms linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* How far a first collection has got.  The width is set from the collector's
+   own count, so it only ever moves forward at the pace of real work. */
+.prog { max-width: 520px; margin: 22px auto 10px; height: 8px;
+  border-radius: 99px; background: var(--line); overflow: hidden; }
+.prog .fill { height: 100%; width: 0; border-radius: 99px;
+  background: linear-gradient(90deg, var(--blue), var(--green));
+  transition: width 600ms cubic-bezier(.4, 0, .2, 1); }
+/* Before the first count arrives there is no share to show, so the bar
+   says "something is happening" rather than standing at zero. */
+.prog.waiting .fill { width: 34% !important; animation: creep 1.6s ease-in-out infinite; }
+@keyframes creep { 0%, 100% { transform: translateX(-42%); } 50% { transform: translateX(180%); } }
+.progline { max-width: 520px; margin: 0 auto 6px; display: flex;
+  justify-content: space-between; gap: 12px; font-size: 13px; }
+.progline .pct { font-variant-numeric: tabular-nums; color: var(--muted); }
 body.firstrun nav, body.firstrun .aibtn { opacity: .35; pointer-events: none; }
 
 /* The account menu in the corner. */

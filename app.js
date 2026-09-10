@@ -2221,7 +2221,7 @@ async function load() {
     /* The server has nothing for this person, so a snapshot of theirs is
        no longer true. */
     snapDrop();
-    firstRun(body.who || "", body.collecting);
+    firstRun(body.who || "", body.collecting, body.progress);
     return false;
   }
   if (!r.ok) throw new Error("Could not read the collected patches.");
@@ -2233,7 +2233,7 @@ async function load() {
 /* The first time somebody signs in there is nothing to show yet, because
    reading a few hundred threads off lore takes minutes.  Say that, keep
    checking, and open the dashboard the moment it is there. */
-function firstRun(who, collecting) {
+function firstRun(who, collecting, progress) {
   document.body.classList.add("firstrun");
   showWho(who);
   $("bar").classList.add("hidden");
@@ -2241,38 +2241,66 @@ function firstRun(who, collecting) {
   $("viewsub").textContent = who || "";
   $("view").innerHTML = `<div class="panel wide"><div class="body">
     <div class="empty tall">
-      <div class="spinner"></div>
-      <h3>Reading your patches from lore</h3>
-      <p>${collecting === false
-        ? "Starting the first collection."
-        : "This is the first time this address has signed in, so everything "
-          + "has to be fetched: every message you posted, every thread, and "
-          + "which trees they reached."}</p>
-      <p class="muted">It takes a few minutes. This page will open by itself
-      when it is ready, so there is nothing to do but wait.</p>
-      <p class="muted" id="firstwait"></p>
+      <h3>Reading your patches from the archives</h3>
+      <p>This is the first time this address has signed in, so everything
+      has to be fetched: every message you posted, every thread, and which
+      trees they reached.</p>
+      <div class="prog waiting" id="prog"><div class="fill" id="progfill"></div></div>
+      <p class="progline">
+        <span id="progwhat">${collecting === false
+          ? "Starting the collection" : "Getting ready"}</span>
+        <span class="pct" id="progpct"></span>
+      </p>
+      <p class="muted" id="firstwait">This page opens by itself when it is
+      ready, so there is nothing to do but wait.</p>
     </div>
   </div></div>`;
+  drawProgress(progress);
 
-  let waited = 0;
+  /* Poll faster than the collection changes, so the bar moves in step with
+     the work rather than in five second jumps. */
+  const began = Date.now();
   const tick = setInterval(async () => {
-    waited += 5;
-    const mins = Math.floor(waited / 60);
-    $("firstwait").textContent = mins
-      ? "waiting " + plural(mins, "minute") + " so far"
-      : "waiting " + waited + " seconds so far";
     try {
       const r = await fetch("data.json?t=" + Date.now(), { cache: "no-store" });
       if (r.status === 401) { location.href = "/login"; return; }
-      if (!r.ok) return;
-      clearInterval(tick);
-      S.data = await r.json();
-      document.body.classList.remove("firstrun");
-      S.view = "overview";
-      S.painted = "";
-      render();
-    } catch (e) { /* keep waiting */ }
-  }, 5000);
+      if (r.ok) {
+        clearInterval(tick);
+        S.data = await r.json();
+        snapSave((S.status && S.status.who) || who, S.data);
+        document.body.classList.remove("firstrun");
+        S.view = location.hash.replace("#", "") || "overview";
+        S.painted = "";
+        render();
+        return;
+      }
+      const body = await r.json().catch(() => ({}));
+      drawProgress(body.progress, Math.round((Date.now() - began) / 1000));
+      if (body.last_error) $("progwhat").textContent = body.last_error;
+    } catch (e) { /* the server going away for a moment is fine */ }
+  }, 1500);
+}
+
+/* The collector counts its own work, so the bar is a real share of it and
+   never runs ahead of what has been done. */
+function drawProgress(p, waited) {
+  const bar = $("prog"), fill = $("progfill");
+  if (!bar || !fill) return;
+  const pct = p && typeof p.percent === "number" ? p.percent : null;
+  bar.classList.toggle("waiting", pct === null);
+  if (pct !== null) fill.style.width = pct + "%";
+  if (p && p.label) {
+    const of = p.total ? ` ${p.done} of ${p.total}` : "";
+    $("progwhat").textContent = p.label + of + (p.note && p.total
+      ? "" : p.note ? " \u2014 " + p.note : "");
+  }
+  $("progpct").textContent = pct === null ? "" : pct + "%";
+  if (waited !== undefined) {
+    const mins = Math.floor(waited / 60);
+    $("firstwait").textContent = (mins
+      ? "waiting " + plural(mins, "minute")
+      : "waiting " + waited + " seconds") + " so far";
+  }
 }
 
 /* A scheduled collection must not rearrange the page under someone's hands.
