@@ -80,6 +80,14 @@ Only a signed session token is kept, in a cookie, and the server holds no
 session table. The server listens on `127.0.0.1` by default, so nothing else
 on the network can reach it.
 
+Stopping the server signs you out: on a machine you run for yourself,
+stopping it is how you finish with it, and coming back to find somebody's
+dashboard still open is not what that looked like it meant. Something
+deployed wants the opposite, since restarting for a new version should not
+throw everyone back to the login page, so set
+`PATCHVANE_SIGN_OUT_ON_RESTART=0` there. A sign-in lasts
+`PATCHVANE_SESSION_HOURS` either way, twelve by default.
+
 ## Whose patches it shows
 
 Yours, and it works out which those are from how you signed in. There is no

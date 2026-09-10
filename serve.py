@@ -364,11 +364,24 @@ def who_may() -> str:
 
 # ----------------------------------------------------------------- sessions
 
-# A signed cookie rather than a table in memory: a restart or a second worker
-# must not sign everybody out, and there is nothing to leak if the process is
-# dumped.  Bumping PATCHVANE_SESSION_EPOCH invalidates every issued session.
+# A signed cookie rather than a table in memory: a second worker must not
+# sign everybody out, and there is nothing to leak if the process is dumped.
+# Every session carries the epoch it was issued under and is refused when
+# that no longer matches, so changing the epoch signs everybody out at once.
 SECRET = env("PATCHVANE_SECRET")
-EPOCH = env("PATCHVANE_SESSION_EPOCH", "1")
+
+# Whether starting the server again signs everybody out.  On a machine
+# somebody runs for themselves, stopping it and starting it is how you
+# finish with it, and coming back to somebody's dashboard already open is
+# not what stopping it looked like it meant.  A deployment is the other
+# way round: restarting to pick up a new version should not throw every
+# signed-in person back to the login page.
+SIGN_OUT_ON_RESTART = env_flag("PATCHVANE_SIGN_OUT_ON_RESTART", not CLOUD)
+
+# An epoch set by hand is a deliberate choice and always wins, whichever
+# way the flag above points.
+EPOCH = (env("PATCHVANE_SESSION_EPOCH")
+         or (secrets.token_urlsafe(9) if SIGN_OUT_ON_RESTART else "1"))
 
 
 def sign(payload: dict) -> str:
