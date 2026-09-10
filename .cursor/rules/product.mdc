@@ -1,0 +1,51 @@
+---
+description: What Patchvane is and what its pages are allowed to say
+alwaysApply: true
+---
+
+# Patchvane is a published website, not a script with a web page
+
+Anyone may sign in with their own address. Assume the reader installed
+nothing, cannot read a log, and cannot run a command on the machine.
+
+## What a page may say
+
+Never put these in the interface:
+
+- exception text, stack traces, `errno`, `_ssl.c`, library or module names
+- file paths, cache directories, environment variables
+- a command to run, a script to invoke, or the name of one such as
+  `netcheck.py`, `collect.py` or `run.sh`
+
+A step that failed reports a short code (`untrusted`, `dns`, `timeout`,
+`blocked`, `refused`, `offline`, `tls`, `http`). The page turns that code
+into a sentence about what is happening and who can fix it. The reason
+itself belongs in the server log, and `without_reasons()` in `serve.py`
+strips it before any collection reaches the browser.
+
+```js
+// NO: the reader can do nothing with this
+${esc(src[n].error)}
+// YES: phrased for whoever signed in
+${TROUBLE[src[n].code]}
+```
+
+Diagnostics for whoever runs the server are welcome in `netcheck.py` and
+the log, and only there.
+
+## The shape of a visit
+
+Start, then the login page, then sign in with the address and an app
+password, then a wait with a live progress bar fed by the collector's own
+counts, then the dashboard. Never a blank dashboard of zeros with no
+explanation of why it is empty.
+
+Data is collected from lore, patchwork and git.kernel.org for that address
+on that visit. It is never copied between machines. What a browser keeps in
+`localStorage` is a snapshot for that signed-in address, so a return visit
+paints at once, and it is dropped on sign-out and on a change of account.
+
+## Never weaken this to make a run succeed
+
+Certificate verification stays on, keys stay per-user and encrypted, and
+one person's collection is never served to another.

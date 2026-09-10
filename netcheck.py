@@ -9,6 +9,13 @@ the same User-Agent, and says what came back.
 
     python3 netcheck.py                     the address in config.json
     python3 netcheck.py you@example.com     somebody else's
+
+When a network opens TLS and signs it again itself, the certificate doing
+that is sitting on the connection, and writing it into the system store is
+the whole fix.  This saves it:
+
+    python3 netcheck.py --save-ca           into ./network-ca/
+    python3 netcheck.py --save-ca /tmp/ca   somewhere else
 """
 
 import json
@@ -74,6 +81,91 @@ def presented_by(host: str, port: int = 443) -> str:
         return "could not read the issuer: %s" % exc
 
 
+def chain_of(host: str, port: int = 443) -> list:
+    """Every certificate this host sends, leaf first, unverified.
+
+    Unverified because the point is to look at a chain that will not
+    verify.  Nothing here is trusted by reading it; the certificates are
+    written to a file and it takes root to install them.
+    """
+    try:
+        p = subprocess.run(
+            ["openssl", "s_client", "-showcerts", "-servername", host,
+             "-connect", "%s:%d" % (host, port)],
+            input="", capture_output=True, text=True, timeout=30)
+    except FileNotFoundError:
+        return []
+    except Exception:
+        return []
+    return re.findall(r"-----BEGIN CERTIFICATE-----.*?"
+                      r"-----END CERTIFICATE-----", p.stdout or "", re.S)
+
+
+def describe(pem: str) -> dict:
+    """Subject, issuer, and whether this certificate may sign others."""
+    def ask(*args) -> str:
+        try:
+            p = subprocess.run(["openssl", "x509", "-noout"] + list(args),
+                               input=pem, capture_output=True, text=True,
+                               timeout=15)
+            return (p.stdout or "").strip()
+        except Exception:
+            return ""
+
+    subject = ask("-subject")
+    issuer = ask("-issuer")
+    for head in ("subject=", "issuer="):
+        subject = subject[len(head):].strip() if subject.startswith(head) \
+            else subject
+        issuer = issuer[len(head):].strip() if issuer.startswith(head) \
+            else issuer
+    return {"pem": pem, "subject": subject, "issuer": issuer,
+            "ca": "CA:TRUE" in ask("-text"), "root": subject == issuer}
+
+
+def save_ca(host: str, where: str) -> int:
+    """Write the signing certificates from host's chain for installing."""
+    chain = chain_of(host)
+    if not chain:
+        print("Could not read the chain %s presents. Is openssl installed,"
+              % host)
+        print("and can this machine open a connection to it at all?")
+        return 1
+
+    certs = [describe(pem) for pem in chain]
+    signers = [c for c in certs if c["ca"]]
+    if not signers:
+        print("%s sent %d certificate(s) and none of them signs others,"
+              % (host, len(certs)))
+        print("so there is nothing here to install. The trouble is elsewhere.")
+        return 1
+
+    os.makedirs(where, exist_ok=True)
+    for n, cert in enumerate(signers, 1):
+        path = os.path.join(where, "network-ca-%d.crt" % n)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(cert["pem"].strip() + "\n")
+        print("%s\n    %s%s" % (path, cert["subject"],
+                                "  (signs itself)" if cert["root"] else ""))
+
+    print("""
+Read those names. Installing one tells this machine to believe anything it
+signs, so it has to be an authority you mean to trust: your employer, or
+whoever runs this network. If a name there is not one you recognise, stop
+and ask, because trusting the wrong one is worse than not reading lore.
+
+If you do recognise it, this installs them for every program on the
+machine, Python included:
+
+    sudo cp %s/network-ca-*.crt /usr/local/share/ca-certificates/
+    sudo update-ca-certificates
+
+Then forget the refusals already remembered and look again:
+
+    rm -rf cache/ && python3 netcheck.py""" % where)
+    return 0
+
+
 def config() -> dict:
     try:
         with open(os.path.join(HERE, "config.json"), encoding="utf-8") as fh:
@@ -113,14 +205,25 @@ def probe(what: str, url: str, ua: str) -> tuple:
 
 def main() -> int:
     cfg = config()
-    who = (sys.argv[1] if len(sys.argv) > 1
+    args = sys.argv[1:]
+
+    lore_base = (cfg.get("lore") or {}).get("base", "https://lore.kernel.org")
+    if "--save-ca" in args:
+        at = args.index("--save-ca")
+        rest = args[at + 1:]
+        where = (rest[0] if rest and not rest[0].startswith("-")
+                 and "@" not in rest[0] else os.path.join(HERE, "network-ca"))
+        host = urllib.parse.urlsplit(lore_base).hostname or "lore.kernel.org"
+        return save_ca(host, where)
+
+    who = (args[0] if args
            else os.environ.get("PATCHVANE_OWNER") or cfg.get("email") or "")
     if not who:
         print("Which address? pass one: python3 netcheck.py you@example.com")
         return 2
 
     ua = "%s (%s)" % (cfg.get("user_agent", "patchvane/2.0"), who)
-    lore = (cfg.get("lore") or {}).get("base", "https://lore.kernel.org")
+    lore = lore_base
     korg = (cfg.get("korg") or {}).get("base", "https://git.kernel.org")
 
     proxies = {k: v for k, v in os.environ.items()
@@ -156,20 +259,15 @@ def main() -> int:
             print("  %s" % line)
         print("""
 If that issuer is your employer or a security appliance rather than a
-public authority, this network opens TLS and re-signs it, and the
-interpreter has not been told to trust the certificate doing that. The
-browser works because it was told separately. Two ways to fix it:
+public authority, this network opens TLS and signs it again itself, and
+the interpreter has not been told to trust the certificate doing that.
+The browser works because it was told separately, usually by whoever set
+the machine up.
 
-  * put that certificate in the system store, which fixes everything on
-    the machine at once:
+The certificate is on the connection, so you do not have to go and find
+it. This writes it out and prints how to install it:
 
-      sudo cp your-ca.crt /usr/local/share/ca-certificates/
-      sudo update-ca-certificates
-
-  * or point this at a bundle without touching the system, by adding it
-    to .env, which run.sh reads:
-
-      export SSL_CERT_FILE=/path/to/your-ca.pem
+      python3 netcheck.py --save-ca
 
 If instead the issuer is a normal public authority, the store itself is
 the problem, and on Debian or Ubuntu this rebuilds it:

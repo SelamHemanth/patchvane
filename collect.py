@@ -196,6 +196,11 @@ class Fetcher:
         # is thrown away here and the caller can only say that it got
         # nothing back, which is the symptom and never the thing to fix.
         self.why = Counter()
+        # The same failures named in one word each.  The sentence in why is
+        # written for whoever runs the server and reads the log; the page
+        # has to say something to a person who did not install anything and
+        # cannot act on a verify_message, so it phrases these itself.
+        self.codes = Counter()
         os.makedirs(CACHE, exist_ok=True)
 
     def _path(self, url: str) -> str:
@@ -208,16 +213,48 @@ class Fetcher:
         reason, n = self.why.most_common(1)[0]
         return "%s (%d %s)" % (reason, n, "request" if n == 1 else "requests")
 
+    def code(self) -> str:
+        """The most common kind of failure, as one word."""
+        return self.codes.most_common(1)[0][0] if self.codes else ""
+
+    def _note(self, reason: str, code: str) -> None:
+        self.errors += 1
+        self.why[reason] += 1
+        self.codes[code] += 1
+
+    @staticmethod
+    def _code(exc: Exception) -> str:
+        """Which kind of failure this is, for the page to put into words."""
+        if isinstance(exc, urllib.error.HTTPError):
+            return "blocked" if exc.code in (403, 407, 451) else "http"
+        if isinstance(exc, urllib.error.URLError):
+            exc = exc.reason if isinstance(exc.reason, Exception) else exc
+        if isinstance(exc, ssl.SSLCertVerificationError):
+            return "untrusted"
+        if isinstance(exc, ssl.SSLError):
+            return "tls"
+        if isinstance(exc, socket.gaierror):
+            return "dns"
+        if isinstance(exc, (socket.timeout, TimeoutError)):
+            return "timeout"
+        if isinstance(exc, (ConnectionRefusedError, ConnectionResetError)):
+            return "refused"
+        return "offline" if isinstance(exc, OSError) else "unknown"
+
     @staticmethod
     def _reason(exc: Exception) -> str:
         """One short line naming what went wrong, and what to do about it."""
         if isinstance(exc, urllib.error.URLError):
             exc = exc.reason if isinstance(exc.reason, Exception) else exc
         if isinstance(exc, ssl.SSLCertVerificationError):
+            # verify_message is set by the ssl module and missing on one
+            # built any other way, and failing here would lose the reason
+            # for the failure being described.
             return ("the TLS certificate could not be verified: %s. This "
                     "machine does not trust whoever signed it, so nothing "
                     "can be read. Run python3 netcheck.py"
-                    % (exc.verify_message or "no issuer found"))
+                    % (getattr(exc, "verify_message", None)
+                       or getattr(exc, "reason", None) or "no issuer found"))
         if isinstance(exc, ssl.SSLError):
             return "TLS failed: %s" % exc
         if isinstance(exc, socket.gaierror):
@@ -258,7 +295,7 @@ class Fetcher:
             return blob if binary else blob.decode("utf-8", "replace")
 
         delay = 1.0
-        reason = "no answer"
+        reason, code = "no answer", "unknown"
         for attempt in range(retries):
             req = urllib.request.Request(url, headers={"User-Agent": UA})
             try:
@@ -281,8 +318,7 @@ class Fetcher:
                     time.sleep(delay)
                     delay *= 2
                     continue
-                self.errors += 1
-                self.why[self._reason(exc)] += 1
+                self._note(self._reason(exc), self._code(exc))
                 return stale()
             except Exception as exc:
                 # A certificate this machine cannot verify will not verify
@@ -290,17 +326,16 @@ class Fetcher:
                 # four of them turns one wrong answer into a minute of
                 # waiting for every URL.
                 reason = self._reason(exc)
+                code = self._code(exc)
                 if isinstance(getattr(exc, "reason", exc),
                               ssl.SSLCertVerificationError):
-                    self.errors += 1
-                    self.why[reason] += 1
+                    self._note(reason, code)
                     return stale()
                 if attempt == retries - 1:
                     break
                 time.sleep(delay)
                 delay *= 2
-        self.errors += 1
-        self.why[reason] += 1
+        self._note(reason, code)
         return stale()
 
     def head_ok(self, url: str, ttl: float | None = None) -> bool:
@@ -2105,7 +2140,11 @@ def main() -> int:
         try:
             fn()
         except Exception as exc:
-            out["sources"][name] = {"ok": False, "error": str(exc)}
+            # error is for the log and for anyone running this by hand.  code
+            # is what the page is allowed to show, because a person who just
+            # signed in cannot do anything with an SSL message.
+            out["sources"][name] = {"ok": False, "error": str(exc),
+                                    "code": f.code() or "unknown"}
             log("%s FAILED: %s" % (name, exc))
             if "--debug" in flags:
                 traceback.print_exc()

@@ -350,27 +350,48 @@ function viewOverview() {
     patchwork: ["Checking patchwork", "patchwork.kernel.org"],
     korg: ["Looking through the trees", "git.kernel.org"],
   };
+  /* What to say about each kind of failure.  Never the exception text: it
+     names libraries and files that mean nothing to somebody who opened a
+     dashboard, and reads like something broke in the page rather than
+     something being in the way of it. The exact reason is in the server's
+     own log, where whoever runs it can act on it. */
+  const TROUBLE = {
+    untrusted: "Something on this network is inspecting secure connections, "
+      + "and this computer has not been set up to trust it, so the archives "
+      + "cannot be read. On a company network the IT team will know what to "
+      + "install; on your own, connecting another way will avoid it.",
+    tls: "The secure connection to the archives could not be established.",
+    dns: "The archives could not be looked up, which usually means this "
+      + "computer has no working network connection.",
+    timeout: "The archives did not answer in time. They may be busy, or "
+      + "this connection may be very slow.",
+    refused: "The connection to the archives was closed before anything "
+      + "could be read.",
+    blocked: "This network turned the request away before it reached the "
+      + "archives.",
+    offline: "This computer could not reach the archives.",
+  };
   const src = d.sources || {};
   const broke = Object.keys(SOURCE).filter(
     (n) => src[n] && src[n].ok === false && src[n].error !== "skipped");
   const missed = (src.cache || {}).errors || 0;
+  /* A collection from before the codes existed has none, so fall back to
+     saying only what is certainly true. */
+  const why = TROUBLE[(broke.length && src[broke[0]].code) || ""]
+    || "The archives could not be read from this computer.";
 
   const shortfall = !broke.length && !missed ? "" : `
   <div class="panel warn" data-reveal><div class="body">
     ${broke.length ? `<strong>${broke.map((n) => SOURCE[n][0]).join(", ")}
-      did not work on the last collection.</strong>
-      ${broke.map((n) => esc(String(src[n].error || "no reason given")))
-             .join("; ")}.`
+      did not work last time.</strong> ${why}`
       : `<strong>${plural(missed, "request")} to the archives did not come
          back.</strong>`}
     ${k.patches
       ? " Some of what is below may be missing or out of date."
-      : " That is why there is nothing below: this is a collection that "
-        + "could not read your patches, not an answer about them."}
-    <span class="muted"> Check that this machine can reach
-    ${broke.length ? broke.map((n) => SOURCE[n][1]).join(" and ")
-                   : "lore.kernel.org and git.kernel.org"},
-    through a proxy if this network needs one, then collect again.</span>
+      : " That is why there is nothing below: this is what could be read, "
+        + "not an answer about your patches."}
+    <span class="muted"> Once the connection works, refresh to collect
+    again.</span>
   </div></div>`;
 
   return `
@@ -2292,7 +2313,10 @@ function firstRun(who, collecting, progress) {
       }
       const body = await r.json().catch(() => ({}));
       drawProgress(body.progress, Math.round((Date.now() - began) / 1000));
-      if (body.last_error) $("progwhat").textContent = body.last_error;
+      if (body.failed && !body.collecting) {
+        $("progwhat").textContent = "The archives could not be reached";
+        $("firstwait").textContent = "Trying again shortly.";
+      }
     } catch (e) { /* the server going away for a moment is fine */ }
   }, 1500);
 }

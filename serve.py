@@ -499,6 +499,28 @@ def policy(email: str = "") -> redact.Policy:
         own_email=own)
 
 
+def without_reasons(data: dict) -> dict:
+    """The same collection with the reasons steps failed taken out.
+
+    That a step failed has to reach the page, because it is the difference
+    between having posted nothing and not having been able to look.  Why it
+    failed is a sentence about TLS or sockets written for whoever runs the
+    server, it stays in the log, and it is no use to a reader who only
+    signed in.  "skipped" is left alone: the page reads it to tell a step
+    that was never asked for from one that broke."""
+    src = data.get("sources")
+    if not isinstance(src, dict):
+        return data
+    clean = {}
+    for name, info in src.items():
+        if isinstance(info, dict) and info.get("error", "skipped") != "skipped":
+            info = {k: v for k, v in info.items() if k != "error"}
+        clean[name] = info
+    out = dict(data)
+    out["sources"] = clean
+    return out
+
+
 def load_data(email: str, public: bool = False):
     """One person's collected patches, and a redacted copy of them.
 
@@ -519,7 +541,7 @@ def load_data(email: str, public: bool = False):
                 % (quiet_addr(email), exc))
             return {}
         slot = {"mtime": mtime, "raw": raw,
-                "public": policy(email).apply(raw)}
+                "public": without_reasons(policy(email).apply(raw))}
         # A server with many users must not hold every one of their files in
         # memory for ever; the ones in use stay, the rest are re-read.
         if len(_CACHE) > 8:
@@ -561,9 +583,13 @@ def run_collect(email: str, full: bool = False, why: str = "manual") -> tuple:
         state["last_run"] = now_iso()
         state["last_ok"] = p.returncode == 0
         if p.returncode != 0:
+            # The last log line is what a person running this by hand wants
+            # and what the log keeps.  What goes back to the page is a
+            # sentence, because that line is as likely to be a traceback as
+            # anything a reader could act on.
             state["last_error"] = summary
             log("collection for %s failed: %s" % (quiet_addr(email), summary))
-            return False, summary or "collect.py exited %d" % p.returncode
+            return False, "The collection could not be finished."
         state["last_error"] = ""
         state["last_summary"] = summary
         log("collected for %s: %s" % (quiet_addr(email), summary))
@@ -1551,10 +1577,14 @@ class Handler(BaseHTTPRequestHandler):
                 # rather than showing an error.  A session that outlived a
                 # restart lands here too, so make sure something is running.
                 busy = ensure_collecting(me, why="empty dashboard")
+                # Whether the last run failed, but not what it said: the
+                # reason names TLS, sockets and file paths, and belongs in
+                # the log this server already writes, not in a page someone
+                # signed in to read about their patches.
                 self.json_out(404, {"ok": False, "error": "no data yet",
                                     "collecting": busy,
                                     "progress": progress_of(me),
-                                    "last_error": run.get("last_error", ""),
+                                    "failed": bool(run.get("last_error")),
                                     "who": me})
             else:
                 self.send(200, json.dumps(d).encode(), "application/json")
@@ -1570,7 +1600,7 @@ class Handler(BaseHTTPRequestHandler):
                 "interval": STATE["interval"],
                 "next_run": STATE["next_run"],
                 "last_run": run["last_run"],
-                "last_error": run["last_error"],
+                "last_error": bool(run["last_error"]),
                 "generated": d.get("generated"),
                 "privacy": policy(me).describe(),
                 "who": me,

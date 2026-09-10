@@ -11,6 +11,10 @@ people/
 cache/
 __pycache__/
 
+# Certificates netcheck.py --save-ca pulls off this network, to be installed
+# on this machine.  They belong to whoever runs it, not to the project.
+network-ca/
+
 # Older single-address layouts, before people/ existed.
 data.json
 notes.json
