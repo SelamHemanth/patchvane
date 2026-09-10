@@ -341,7 +341,24 @@ function viewOverview() {
 
   const feed = d.activity.slice(0, 7).map(feedItem).join("");
 
+  /* A collection that cannot reach the archives still finishes and still
+     writes a file, so a blocked network or a proxy arrives here as a
+     confident zero. Say what was refused, rather than letting the page
+     report that you have posted nothing. */
+  const missed = ((d.sources || {}).cache || {}).errors || 0;
+  const shortfall = !missed ? "" : `
+  <div class="panel warn" data-reveal><div class="body">
+    <strong>${plural(missed, "request")} to the archives did not come back.</strong>
+    ${k.patches
+      ? " Some of what is below may be missing or out of date."
+      : " That is why there is nothing below: this is a collection that "
+        + "could not read your patches, not an answer about them."}
+    <span class="muted"> Check that this machine can reach lore.kernel.org
+    and git.kernel.org, then collect again.</span>
+  </div></div>`;
+
   return `
+  ${shortfall}
   <section class="hero" data-reveal>
     <div class="hx">
       <p class="eyebrow">${esc(hello)}${first ? ", " + esc(first) : ""}</p>

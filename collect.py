@@ -148,10 +148,14 @@ class Fetcher:
                     fh.write(blob)
                 return blob if binary else blob.decode("utf-8", "replace")
             except urllib.error.HTTPError as exc:
-                if exc.code in (404, 400, 403):
+                if exc.code in (404, 400):
                     with open(path, "wb") as fh:
                         fh.write(b"\x00MISSING")
                     return None
+                # 403 is a refusal, not an absence.  Caching it as a miss
+                # turns a proxy or a rate limit into "you have posted
+                # nothing", and keeps saying so for the life of the cache
+                # entry.  Count it and let the caller see the shortfall.
                 if exc.code in (429, 500, 502, 503, 504):
                     time.sleep(delay)
                     delay *= 2
