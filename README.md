@@ -13,12 +13,21 @@ needed.
 
 ```bash
 cd patchvane
-python3 serve.py            # then open http://127.0.0.1:8787
+./run.sh                    # then open http://127.0.0.1:8787
 ```
 
-There is no install step. `requirements.txt` is there and lists nothing,
-because the whole of this runs on the Python standard library: no requests,
-no web framework, no crypto library. All it wants is Python 3.10 or newer.
+That is the whole of it, on a fresh clone. `run.sh` writes a `.env` from
+`.env.example` if there is none, generates the secret that signs the session
+cookie, and starts the server. Nothing to copy, edit or generate by hand, and
+running it again reuses what the first run wrote.
+
+There is no install step either. `requirements.txt` is there and lists
+nothing, because the whole of this runs on the Python standard library: no
+requests, no web framework, no crypto library. `run.sh` installs from it only
+if a real line ever appears there, so the usual run does not need pip at all.
+All it wants is Python 3.10 or newer, which it checks for before starting.
+
+`python3 serve.py` also works, and skips `.env` entirely.
 
 Sign in, and it starts collecting the patches you posted from that address.
 The first run takes a few minutes because it reads the whole lore archive for

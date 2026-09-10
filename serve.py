@@ -1750,9 +1750,15 @@ def problems() -> list:
                    "PATCHVANE_ALLOW_GMAIL on to sign in with your Gmail "
                    "address and an app password, or set a passphrase with: "
                    "python3 serve.py --hash-passphrase")
-    if ALLOW_GMAIL and not OWNER:
-        bad.append("Sign-in by Gmail address is on, but config.json has no "
-                   "profile email to accept, so nobody could ever get in.")
+    # Gmail sign-in deliberately needs no address configured: the app password
+    # is checked against the mailbox it claims to be, and whoever gets in gets
+    # a dashboard of their own patches.  OWNER is only the passphrase route's
+    # default.  Demanding it here made a fresh clone refuse to start.
+    if SIGNIN_EMAILS and not any("@" in a for a in SIGNIN_EMAILS):
+        bad.append("The sign-in allowlist has no address in it, so nobody "
+                   "could ever get in. Fix PATCHVANE_ALLOW_EMAILS or "
+                   "signin.emails in config.json, or unset it to let anyone "
+                   "in who can log into their own mailbox.")
     if REQUIRE_BOTH and not (PASS_HASH and ALLOW_GMAIL):
         bad.append("PATCHVANE_REQUIRE_BOTH is set but only one sign-in method "
                    "is configured, so nobody could ever get in.")
