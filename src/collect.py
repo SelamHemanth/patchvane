@@ -473,12 +473,52 @@ DECLINED_RE = re.compile(
     r"not\s+going\s+to\s+(?:apply|take|merge)|"
     r"rather\s+not\s+(?:apply|take|merge)|"
     r"\bnacked-by\b|"
+    # The commonest rejection on a kernel list is the word on its own at
+    # the top of the mail -- "NACK, this kind of churn is not productive"
+    # -- and matching only the trailer missed every one of them.  Anchored
+    # to the start of a line so that discussing a nack is not being given
+    # one.
+    r"^[ \t]*n[ao]ck\b|"
     r"(?:has|have)\s+(?:already\s+)?been\s+fixed\s+(?:in|by)\b|"
-    r"already\s+fixed\s+(?:in|by)\b)", re.I)
+    r"already\s+fixed\s+(?:in|by)\b)", re.I | re.M)
 
 
 def says_declined(text: str) -> bool:
     return bool(DECLINED_RE.search(text))
+
+
+# "Thanks!", "Much appreciated", "Nice work" -- the note that closes a
+# conversation rather than continuing it.
+COURTESY_RE = re.compile(
+    r"\b(thank(?:s| you)|much appreciated|appreciate (?:it|that)|"
+    r"no worries|nice (?:work|catch)|good (?:work|catch)|well spotted|"
+    r"glad to hear)\b", re.I)
+
+# Anything that leaves the author with something to do.  A question mark
+# is the obvious one; the rest are the ways a request gets made without
+# one, since "please resend with the tag added" asks just as plainly.
+ASKS_RE = re.compile(
+    r"(\?|\b(?:could|can|would|will)\s+you\b|\bcould\s+we\b|\bplease\b|"
+    r"\bre-?(?:send|spin|submit|base)\b|\bfix\b|\bdrop\b|\bsplit\b|"
+    r"\bchange\b|\bupdate\b|\badd\b|\bremove\b|\brework\b|\bv\d+\b)", re.I)
+
+
+def just_thanks(text: str) -> bool:
+    """A closing courtesy with nothing in it to answer.
+
+    Somebody writing "thank you for the thoughtful reply" is ending the
+    conversation, not opening one, and a thread flagged on it sends the
+    author back to a list to say "you're welcome" -- the exact noise the
+    surrounding function exists to prevent.
+
+    Short, because length is the tell: three lines of thanks is a sign-off
+    and fifteen lines containing the word "thanks" is a review with a
+    polite opening, and the second of those has to stay flagged.
+    """
+    body = (text or "").strip()
+    if not body or len(body) > 400:
+        return False
+    return bool(COURTESY_RE.search(body)) and not ASKS_RE.search(body)
 
 
 def says_applied(text: str) -> bool:
@@ -2061,6 +2101,9 @@ def waiting_on_us(thread: list, state: str = "", answered_at: str = "") -> bool:
     # over and a reply saying so is the noise this whole function exists to
     # avoid putting on a list somebody has to read.
     if last.get("declined"):
+        return False
+    # The last word being somebody thanking us for ours.
+    if just_thanks(last.get("body") or last.get("excerpt") or ""):
         return False
     if answered_at and answered_at > last["date"]:
         return False
