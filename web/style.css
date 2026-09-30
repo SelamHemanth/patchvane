@@ -1475,6 +1475,28 @@ body.offline #aibtn, body.offline #refresh, body.offline .out { display: none; }
   background: color-mix(in srgb, var(--blue) 12%, transparent); }
 .btn.sm { padding: 6px 12px; font-size: 12.5px; }
 
+/* Only ever on a narrow screen, where the column headings it stands in
+   for are not drawn. */
+.sortpick { display: none; align-items: center; gap: 7px;
+  padding: 0 4px 0 10px; border: 1px solid var(--line);
+  border-radius: 8px; background: var(--panel); }
+.sortpick span { flex: none; color: var(--ink-3); font-size: 11.5px;
+  font-weight: 600; }
+.sortpick select { border: 0; background: none; color: var(--ink-1);
+  font: inherit; font-size: 12.5px; padding: 9px 2px; cursor: pointer; }
+.sortpick select:focus { outline: none; }
+
+/* Both ends of a scrolling row, driven by how far it has been scrolled:
+   nothing faded at the start but the right-hand end, the two ends in the
+   middle of the range, and only the left-hand end once it is at the end. */
+@keyframes edgefade {
+  from { mask-image: linear-gradient(90deg, #000 calc(100% - 22px),
+           transparent); }
+  50%  { mask-image: linear-gradient(90deg, transparent, #000 14px,
+           #000 calc(100% - 22px), transparent); }
+  to   { mask-image: linear-gradient(90deg, transparent, #000 14px, #000); }
+}
+
 .seg { display: flex; gap: 2px; padding: 2px; border-radius: 8px;
   background: var(--panel-2); border: 1px solid var(--line); }
 .seg button {
@@ -2067,11 +2089,79 @@ html[data-theme="light"] .sky .glow { opacity: .5; filter: blur(80px); }
   .iconbtn.sm { width: 34px; height: 34px; }
 
   /* A table squeezed into 390px gives a patch title a column four words
-     tall.  Let the columns keep a width worth reading and let the wrapper
-     scroll, which is the one place sideways scrolling is the right answer. */
-  .tablewrap { -webkit-overflow-scrolling: touch; }
-  .tablewrap table { min-width: 540px; }
-  thead th, tbody td { padding-left: 11px; padding-right: 11px; }
+     tall, so this used to keep the columns readable and let the wrapper
+     scroll sideways.  That works, and nobody does it: the first column is
+     the one you are reading, the rest are off the right-hand edge, and a
+     list you have to drag sideways to learn anything from is a list you
+     scroll past.
+
+     One card per row instead, laid out down the screen the way a phone
+     wants to be read.  The first column is the heading, since it is the
+     subject or the commit in every table here, and the rest become a
+     label and a value -- the label taken from the column heading, which
+     is the only reason the cells carry it.  Nothing is hidden and no
+     second template exists: it is the same rows, turned ninety degrees. */
+  .tablewrap { overflow: visible; }
+  .tablewrap table { min-width: 0; width: 100%; }
+  .tablewrap table, .grid thead, .grid tbody, .grid tr, .grid td {
+    display: block;
+  }
+  .grid thead { display: none; }
+
+  .grid tbody tr { padding: 12px 13px 13px; }
+  .grid tbody tr + tr { border-top: 1px solid var(--line); }
+  .grid tbody tr:hover { background: none; }
+  .grid tbody td { border: 0; padding: 4px 0;
+    display: flex; gap: 10px; align-items: baseline; }
+  .grid tbody td::before {
+    content: attr(data-lb); flex: none; width: 84px;
+    color: var(--ink-3); font-size: 10.5px; font-weight: 600;
+    letter-spacing: .04em; text-transform: uppercase; line-height: 1.5;
+  }
+  /* The heading of the card, and the row of links or buttons at the foot
+     of it: both are read without being told what they are. */
+  .grid tbody td:first-child { display: block; padding: 0 0 7px; }
+  .grid tbody td:first-child::before,
+  .grid tbody td[data-lb=""]::before { display: none; }
+  .grid tbody td[data-lb=""] { padding-top: 8px; }
+  .grid tbody td > * { min-width: 0; }
+  /* Numbers are right-aligned in a table so the digits line up in a
+     column.  There is no column here, and the rule was pushing the label
+     of every numeric cell away from the labels above and below it. */
+  .grid tbody td, .grid tbody td.num { text-align: left; }
+  /* A value that wrapped inside a 90px column now has the width of the
+     screen, so the nowrap that kept dates on one line is no longer
+     earning anything and the truncation is actively wrong. */
+  .grid tbody td .nowrap { white-space: normal; }
+  .grid tbody td.subject { font-size: 13.5px; }
+
+  /* "lore", "pw", a commit hash: three words that are the width of three
+     words and were fine as a column, and are now the only thing on their
+     line with a fingertip aimed at them.  Padded rather than boxed, so
+     they still read as links and not as a row of buttons. */
+  .grid tbody td.links { gap: 6px; }
+  .grid tbody td.links a, .grid tbody td .mono {
+    display: inline-block; padding: 9px 10px; margin: -7px 0;
+    border-radius: 7px; background: var(--panel-2);
+  }
+  .grid tbody td.links a { font-size: 12px; }
+
+  /* Group headings and "nothing matches" span the card, not a column. */
+  .grid tbody tr.grouprow { padding: 10px 13px; background: var(--panel-2); }
+  .grid tbody td[colspan]::before { display: none; }
+  .grid tbody td[colspan] { display: block; padding: 0; }
+
+  .sortpick { display: flex; }
+
+  /* A panel heading is a title, a line saying what the panel is, and
+     usually a mark and a link on the right.  The spacer that holds those
+     apart on a wide screen has nothing to give here, so it pushes them to
+     a line of their own and the heading alone takes three.  Without it
+     the title keeps its row and the subtitle drops under the lot, which
+     is the order somebody reads them in anyway. */
+  .panel > header { padding: 11px 14px; row-gap: 3px; }
+  .panel > header .spacer { display: none; }
+  .panel > header .sub { order: 9; flex: 1 1 100%; }
 
   .drawer, .drawer.wide { width: 100%; max-width: 100%; }
 
@@ -2103,6 +2193,29 @@ html[data-theme="light"] .sky .glow { opacity: .5; filter: blur(80px); }
   .seg, .tabs { overflow-x: auto; scrollbar-width: none; }
   .seg::-webkit-scrollbar, .tabs::-webkit-scrollbar { display: none; }
   .seg button { flex: none; white-space: nowrap; }
+
+  /* A row that scrolls with no scrollbar and a tab sliced off at the edge
+     looks like a tab that was drawn wrong, not like a row with more in
+     it.  Fading the last few pixels is the difference between the two.
+
+     Held back over the first and last few pixels only, and done with a
+     mask so it fades to whatever is behind rather than to a colour that
+     has to be kept in step with six themes and a wallpaper. */
+  .seg, .tabs, .chipbar {
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 14px,
+      #000 calc(100% - 22px), transparent);
+    mask-image: linear-gradient(90deg, transparent, #000 14px,
+      #000 calc(100% - 22px), transparent);
+  }
+  /* Where the browser can tell how far a thing is scrolled, the fade is
+     only on the side there is actually more on: scrolled to the end, a
+     faded last tab is the same lie the slice was. */
+  @supports (animation-timeline: scroll(self inline)) {
+    .seg, .tabs, .chipbar {
+      animation: edgefade linear both;
+      animation-timeline: scroll(self inline);
+    }
+  }
   /* Enough room to read a query in, and whatever is left over goes to the
      filter button beside it rather than to a line of its own. */
   .search { min-width: 0; max-width: none; flex: 1 1 165px; }
@@ -2112,7 +2225,17 @@ html[data-theme="light"] .sky .glow { opacity: .5; filter: blur(80px); }
      into a button that says how many of them are doing anything, and open
      two at a time when somebody wants them -- which on a phone, where the
      chips above already cover the common filters, is not often. */
-  .filterbtn { display: inline-flex; align-items: center; gap: 6px; order: 2; }
+  /* The search box gets the line to itself.  Sharing it meant a query was
+     read through a slot about twenty characters wide, and `tree:net-next`
+     is longer than that before anybody has typed what they are looking
+     for. */
+  .toolbar .search { flex: 1 1 100%; max-width: none; order: 1; }
+  /* Sorting and filtering are the pair you reach for together, so they
+     share the next line. */
+  .sortpick { order: 2; flex: 1 1 140px; min-width: 0; }
+  .sortpick select { min-width: 0; flex: 1; }
+
+  .filterbtn { display: inline-flex; align-items: center; gap: 6px; order: 3; }
   .filterbtn b { font-size: 10.5px; font-weight: 700; padding: 0 5px;
     border-radius: 9px; background: var(--blue); color: #fff; }
   .filterbtn.on { color: var(--ink); border-color: var(--line-2); }
@@ -2127,9 +2250,42 @@ html[data-theme="light"] .sky .glow { opacity: .5; filter: blur(80px); }
      shown, are both optional and both small.  The group switch already
      scrolls sideways when it runs out of room, so it can give up the rest
      of its line to the buttons instead of taking one of its own. */
-  .toolbar .seg { order: 3; flex: 1 1 130px; min-width: 0; }
-  .toolbar .iconbtn.sm { order: 4; flex: none; }
+  .toolbar .seg { order: 4; flex: 1 1 130px; min-width: 0; }
+  .toolbar .iconbtn.sm { order: 5; flex: none; }
   .toolbar .spacer { display: none; }
+}
+
+/* Comfortable rows against compact rows is a question about a table, and
+   at this width there is no table -- every row is a card laid out down the
+   screen and the setting changes nothing worth the space the button takes
+   from the two beside it. */
+@media (max-width: 680px) {
+  .toolbar .densebtn { display: none; }
+
+  /* Six months of squares is 416px wide and the wrapper scrolls, which
+     sounds fine and is not: it starts at the left, so the half of the year
+     nobody is asking about is on screen and this month is off the edge.
+     It is drawn with a viewBox, so it can simply be told to fit -- the
+     squares lose two pixels each and the whole point of the picture, which
+     is the shape of the last six months at a glance, survives. */
+  .hmwrap svg { max-width: 100%; height: auto; }
+
+  /* Ten status chips, two to a line, is six lines of filter above a list
+     that has not started yet.  One line that scrolls, like the group
+     switch and the tab strips already do here: the first few are the ones
+     anybody wants, and the rest are a thumb away instead of a screen
+     away. */
+  .chipbar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;
+    padding-bottom: 2px;
+    /* So the last chip does not sit flush against the edge and look like
+       the end of the row when it is not. */
+    scroll-padding-inline: 16px; }
+  .chipbar::-webkit-scrollbar { display: none; }
+  .chipbar .chip { flex: none; }
+  /* A hint that there is more of it, tied to the panel rather than the
+     row, so it does not scroll away with the chips. */
+  .panel.grid { position: relative; }
+  .chipbar::after { content: ""; flex: none; width: 4px; }
 }
 
 /* The rest of what a short screen needs: everything above the content gets
@@ -2675,6 +2831,22 @@ table.plain tr.main:hover, table.plain tr.main:hover + tr.sub {
   .road .steps { grid-template-columns: 1fr; }
   .stepface { padding: 13px 15px 11px; }
   .steptail { padding: 0 15px 12px; }
+
+  /* Stacked, a stage is a bar, then a number on a line of its own, then
+     three lines of words: about two hundred pixels, five times over, for
+     a panel whose whole job is to be taken in at a glance.  Beside the
+     words instead, which is where a number that labels them belongs, and
+     which is what the wide layout does anyway -- only turned on its
+     side. */
+  .stepface {
+    display: grid; grid-template-columns: auto 1fr;
+    column-gap: 13px; row-gap: 1px; align-items: baseline;
+  }
+  .stepbar { grid-area: 1 / 1 / 2 / 3; margin-bottom: 10px; }
+  .stepn { grid-area: 2 / 1 / 5 / 2; align-self: center; font-size: 30px; }
+  .stepname { grid-area: 2 / 2 / 3 / 3; }
+  .stepblurb { grid-area: 3 / 2 / 4 / 3; }
+  .steppc { grid-area: 4 / 2 / 5 / 3; }
 }
 
 /* ============================================================ folded detail */

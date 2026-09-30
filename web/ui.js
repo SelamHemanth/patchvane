@@ -847,7 +847,8 @@ function grid(id, rows, cols, opts) {
         ${opts.groups.map((g) => `<button class="${st.group === g.key ? "on" : ""}"
           ${act(gridGroup, id, g.key)}>${esc(g.label)}</button>`).join("")}
       </div>` : ""}
-      <button class="iconbtn sm ${st.dense ? "on" : ""}" ${act(gridDense, id)}
+      ${sortPick(id, shown, st)}
+      <button class="iconbtn sm densebtn ${st.dense ? "on" : ""}" ${act(gridDense, id)}
         title="${st.dense ? "Comfortable rows" : "Compact rows"}">\u2261</button>
       <button class="iconbtn sm" ${act(gridMenu, id, "cols")}
         title="Choose columns">\u229E</button>
@@ -867,10 +868,16 @@ function grid(id, rows, cols, opts) {
   </div>`;
 }
 
+/* Each cell carries its column's name.  On a phone the table is laid out
+   as one card per row with the header gone, and a bare value with nothing
+   saying what it is -- "net-next", "5 days ago", "v6" -- is worse than no
+   column at all.  It costs a few characters a cell and is what makes that
+   layout possible without a second set of templates. */
 function rowHtml(r, cols, opts) {
   const key = opts.rowKey ? opts.rowKey(r) : "";
   return `<tr ${key ? `data-rk="${esc(key)}"` : ""}>` + cols.map((c) =>
-    `<td class="${c.cls || ""}">${c.render(r)}</td>`).join("") + `</tr>`;
+    `<td class="${c.cls || ""}" data-lb="${esc(c.label || "")}">${
+      c.render(r)}</td>`).join("") + `</tr>`;
 }
 
 function emptyRow(id, span, opts) {
@@ -879,6 +886,34 @@ function emptyRow(id, span, opts) {
     <p>Nothing matches that.</p>
     <button class="btn" ${act(gridClear, id)}>Clear filters</button>
   </div></td></tr>`;
+}
+
+/* Sorting, for a screen with no column headings to click.
+
+   On a phone the table is a stack of cards and the header row is gone with
+   it, which would quietly take sorting away -- and sorting is not a power
+   feature on a list of 359 patches, it is how you find the recent ones.
+   One select, only ever shown at that width, carrying the same columns the
+   headings would have offered and both directions of each. */
+function sortPick(id, cols, st) {
+  const can = cols.filter((c) => c.sortable !== false && c.label);
+  if (!can.length) return "";
+  const now = st.sorts[0] || {};
+  const opt = (c, dir) => `<option value="${esc(c.key)}:${dir}" ${
+    now.key === c.key && now.dir === dir ? "selected" : ""
+  }>${esc(c.label)}${dir === "asc" ? " \u2191" : " \u2193"}</option>`;
+  return `<label class="sortpick">
+    <span>Sort</span>
+    <select ${actv("change", gridSortPick, id)}>
+      ${can.map((c) => opt(c, "desc") + opt(c, "asc")).join("")}
+    </select>
+  </label>`;
+}
+
+function gridSortPick(id, value) {
+  const [key, dir] = String(value).split(":");
+  GRIDS[id].sorts = [{ key, dir }];
+  gridRedraw(id);
 }
 
 function filterSelect(id, f, rows, st) {
