@@ -67,8 +67,37 @@
         </span>
       </div>
 
-      <button class="iconbtn" id="refresh" title="Collect fresh data">&#8635;</button>
-      <button class="iconbtn" id="theme" title="Switch theme">&#9789;</button>
+      <!-- Drawn rather than set in a glyph so the two states can be the
+           same shape moving: the arrow turns through the collection, and
+           the moon opens into a sun.  Both are decorative -- the button
+           says what it does. -->
+      <button class="iconbtn cyc" id="refresh" title="Collect fresh data"
+              aria-label="Collect fresh data">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path class="ring" d="M20.5 12a8.5 8.5 0 1 1-2.49-6.01"/>
+          <path class="tip" d="M20.5 3.5v5h-5"/>
+        </svg>
+      </button>
+      <button class="iconbtn sunmoon" id="theme" title="Switch theme"
+              aria-label="Switch theme">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <mask id="bite">
+            <rect x="0" y="0" width="24" height="24" fill="#fff"/>
+            <circle class="bit" cx="18" cy="7" r="8" fill="#000"/>
+          </mask>
+          <circle class="orb" cx="12" cy="12" r="9" mask="url(#bite)"/>
+          <g class="rays">
+            <line x1="12" y1="1.6" x2="12" y2="4.2"/>
+            <line x1="12" y1="19.8" x2="12" y2="22.4"/>
+            <line x1="1.6" y1="12" x2="4.2" y2="12"/>
+            <line x1="19.8" y1="12" x2="22.4" y2="12"/>
+            <line x1="4.6" y1="4.6" x2="6.4" y2="6.4"/>
+            <line x1="17.6" y1="17.6" x2="19.4" y2="19.4"/>
+            <line x1="4.6" y1="19.4" x2="6.4" y2="17.6"/>
+            <line x1="17.6" y1="6.4" x2="19.4" y2="4.6"/>
+          </g>
+        </svg>
+      </button>
       <button class="aibtn" id="aibtn" title="Ask the assistant">
         <span class="sparkle">&#10022;</span><span class="btnlb">Ask AI</span></button>
 

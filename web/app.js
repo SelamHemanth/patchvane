@@ -5040,12 +5040,12 @@ function adoptLook(saved) {
 function adoptTheme(theme) {
   if (S.themeSettled || !theme) return;
   S.themeSettled = true;
+  paintThemeBtn(theme);
   if (document.documentElement.dataset.theme === theme) return;
-  transition(() => {
-    document.documentElement.dataset.theme = theme;
-    localStorage.setItem("patchvane-theme", theme);
-    render();
-  });
+  tinting();
+  document.documentElement.dataset.theme = theme;
+  localStorage.setItem("patchvane-theme", theme);
+  render();
 }
 
 /* Twenty seconds is the right distance apart for "has anything changed",
@@ -5092,6 +5092,7 @@ async function doRefresh(full) {
   }
   if (S.busy) { toast("A collection is already running."); return; }
   S.busy = true;
+  $("refresh").classList.remove("turn");    // the run takes the turning over
   $("refresh").classList.add("spin");
   $("bar").classList.remove("hidden");
   drawStamp();
@@ -5416,19 +5417,59 @@ function wallUpload(el) {
    transitions carry it gets the same crossfade and leaves the button
    free to move. */
 function setTheme(next) {
+  paintThemeBtn(next);
   if (document.documentElement.dataset.theme === next) return;
-  transition(() => {
-    document.documentElement.dataset.theme = next;
-    /* Locally so the next paint on this machine has it before the server
-       answers, and on the server so the next machine starts the same way. */
-    localStorage.setItem("patchvane-theme", next);
-    render();
-  });
+  tinting();
+  document.documentElement.dataset.theme = next;
+  /* Locally so the next paint on this machine has it before the server
+     answers, and on the server so the next machine starts the same way. */
+  localStorage.setItem("patchvane-theme", next);
+  /* A frame behind the rest.  Rebuilding this page is a few hundred
+     milliseconds of blocked main thread on a large collection, and doing
+     it in the same tick as the class change spends that time out of the
+     middle of the button's animation -- the colours change, the moon
+     holds still, and then it is a sun.  The colours are CSS variables and
+     have already taken; this is only for the charts that bake them in. */
+  requestAnimationFrame(() => requestAnimationFrame(render));
   post("/api/prefs", { theme: next }).catch(() => {});
 }
 
+/* Colour is not normally transitioned on everything at once -- it is a lot
+   of elements and it would smear every hover -- so it is switched on for
+   as long as the change takes and then switched off again. */
+let TINT_OFF = null;
+function tinting() {
+  const root = document.documentElement;
+  root.classList.add("tinting");
+  clearTimeout(TINT_OFF);
+  TINT_OFF = setTimeout(() => root.classList.remove("tinting"), 480);
+}
+
+/* Which way the button is drawn, set on the button itself rather than read
+   off the theme on <html>.
+
+   Changing the theme runs the whole page through a view transition, and a
+   view transition works by holding a picture of the old page over the new
+   one until the crossfade finishes.  Anything keyed off data-theme is in
+   that picture, so the moon would sit still for the length of the fade and
+   then jump.  Given its own class, applied before any of that starts, the
+   button moves on the press and the page catches up behind it. */
+function paintThemeBtn(theme) {
+  const b = $("theme");
+  if (b) b.classList.toggle("sun", LIGHT.has(theme));
+}
+
+/* The moon opening into a sun is the shape; the warmth on the way is the
+   colour, and it comes off once the shape has settled so the button goes
+   back to being part of the header. */
 function toggleTheme() {
-  setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+  const b = $("theme");
+  const next = LIGHT.has(document.documentElement.dataset.theme)
+    ? "dark" : "light";
+  b.classList.add("flip");
+  setTimeout(() => b.classList.remove("flip"), 620);
+  paintThemeBtn(next);
+  setTheme(next);
 }
 
 /* Escape only.  This was a page of single-letter shortcuts -- a for the
@@ -5447,12 +5488,24 @@ function keys(e) {
 async function boot() {
   document.documentElement.dataset.theme =
     localStorage.getItem("patchvane-theme") || "dark";
+  paintThemeBtn(document.documentElement.dataset.theme);
+  applyLook();
 
   bindHandlers();
 
   /* The shell lives outside every render, so it is wired once and directly
      rather than through the command map, which render() empties. */
-  $("refresh").addEventListener("click", () => doRefresh(false));
+  /* One turn on the press, whatever comes of it.  A collection can take
+     a second to start and can also be refused -- already running, saved
+     snapshot -- and a button that sits still until the server answers
+     feels broken in both cases. */
+  $("refresh").addEventListener("click", () => {
+    const b = $("refresh");
+    b.classList.remove("turn");
+    void b.offsetWidth;                     // so a second press restarts it
+    b.classList.add("turn");
+    doRefresh(false);
+  });
   $("theme").addEventListener("click", toggleTheme);
   $("aibtn").addEventListener("click", () => askAI());
   $("aiclose").addEventListener("click", closeAI);
