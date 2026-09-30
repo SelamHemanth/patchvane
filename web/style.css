@@ -26,6 +26,50 @@
   --r-sm: 9px;
   --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.7);
   --glow: 0 0 0 1px rgba(76,141,255,.28), 0 8px 30px -10px rgba(76,141,255,.35);
+
+  /* Glass.
+
+     A surface reads as glass when three things are true at once: you can
+     see the room through it, its edge catches the light, and it sits above
+     what it covers rather than being painted on.  Miss any one and it is
+     just a grey box with the opacity turned down.
+
+     --glass is deliberately not very transparent.  Text has to stay
+     readable on top of a background that moves, and the blur below is what
+     sells the depth, not the amount you can see through.  Saturation goes
+     up with the blur because averaging a lot of pixels together washes the
+     colour out, and lifting it back is what keeps the tint underneath from
+     turning grey. */
+  --glass:      color-mix(in srgb, var(--panel) 46%, transparent);
+  --glass-deep: color-mix(in srgb, var(--bg-2) 68%, transparent);
+  --glass-soft: color-mix(in srgb, var(--panel-2) 62%, transparent);
+  --glass-blur: saturate(168%) blur(20px);
+  --glass-thin: saturate(140%) blur(10px);
+
+  /* The lit edge.  Light comes from above, so the top rim is bright, the
+     bottom rim is a dark refracted line, and the hairline border is what
+     gives the pane a thickness to catch it on. */
+  --rim:     rgba(255,255,255,.10);
+  --rim-top: rgba(255,255,255,.30);
+  --rim-low: rgba(0,0,0,.28);
+  --sheen:   rgba(255,255,255,.075);
+
+  /* Three shadows rather than one: contact, lift and the long soft cast
+     that puts real distance between the pane and the page. */
+  --shadow-glass:
+    0 1px 1px rgba(0,0,0,.28),
+    0 10px 24px -14px rgba(0,0,0,.66),
+    0 34px 64px -38px rgba(0,0,0,.85);
+  --shadow-float:
+    0 2px 4px rgba(0,0,0,.26),
+    0 18px 38px -18px rgba(0,0,0,.6),
+    0 52px 92px -46px rgba(0,0,0,.9);
+
+  /* How far a pane rises when pointed at, and how much the page tilts
+     under it.  Small: this is a tracker somebody reads all day, not a
+     product page. */
+  --lift: 3px;
+  --tilt: 1.1deg;
   --sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
           "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo,
@@ -95,6 +139,32 @@ html[data-theme="light"] {
   --cyan:    #0f766e;
   --shadow: 0 1px 2px rgba(16,22,34,.06), 0 10px 26px -16px rgba(16,22,34,.28);
   --glow: 0 0 0 1px rgba(31,111,235,.25), 0 8px 26px -12px rgba(31,111,235,.3);
+
+  /* Glass on a light page is the harder half.  White on white has no
+     contrast to play with, so the pane is kept nearly opaque and the
+     depth is carried by the shadow and the edge instead of by what shows
+     through.  The rim flips: on a dark page the lit edge is white, here
+     the pane is already white and what reads as an edge is the shadow
+     side of it. */
+  --glass:      color-mix(in srgb, var(--panel) 82%, transparent);
+  --glass-deep: color-mix(in srgb, var(--bg-2) 86%, transparent);
+  --glass-soft: color-mix(in srgb, var(--panel-2) 74%, transparent);
+  --glass-blur: saturate(150%) blur(20px);
+  --glass-thin: saturate(130%) blur(10px);
+
+  --rim:     rgba(16,22,34,.055);
+  --rim-top: rgba(255,255,255,.75);
+  --rim-low: rgba(16,22,34,.05);
+  --sheen:   rgba(255,255,255,.5);
+
+  --shadow-glass:
+    0 1px 1px rgba(16,22,34,.05),
+    0 10px 24px -14px rgba(16,22,34,.22),
+    0 34px 64px -40px rgba(16,22,34,.3);
+  --shadow-float:
+    0 2px 4px rgba(16,22,34,.07),
+    0 18px 38px -18px rgba(16,22,34,.22),
+    0 52px 92px -48px rgba(16,22,34,.34);
 }
 
 * { box-sizing: border-box; }
@@ -179,13 +249,44 @@ code { font-family: var(--mono); font-size: .92em;
    being felt, which is the whole intention. */
 .shell::before {
   content: ""; position: absolute; inset: -20%; z-index: -1; pointer-events: none;
+  /* Tighter and brighter than they used to be.  A wash the size of the
+     screen, blurred, is the same colour everywhere, and glass over one
+     flat colour looks exactly like paint: the blur has to have an edge to
+     find or it has nothing to show. */
   background:
-    radial-gradient(38% 42% at 22% 28%,
-      color-mix(in srgb, var(--blue) 60%, transparent), transparent 70%),
-    radial-gradient(34% 38% at 78% 72%,
-      color-mix(in srgb, var(--cyan) 55%, transparent), transparent 70%);
-  opacity: .06; filter: blur(46px);
+    radial-gradient(21% 24% at 18% 22%,
+      color-mix(in srgb, var(--blue) 85%, transparent), transparent 68%),
+    radial-gradient(19% 22% at 72% 16%,
+      color-mix(in srgb, var(--cyan) 75%, transparent), transparent 68%),
+    radial-gradient(23% 26% at 84% 66%,
+      color-mix(in srgb, var(--purple) 70%, transparent), transparent 68%),
+    radial-gradient(18% 20% at 34% 78%,
+      color-mix(in srgb, var(--cyan) 65%, transparent), transparent 68%);
+  /* Lifted from .06 now that glass sits on top of it.  Six per cent was
+     tuned to be felt and not seen behind opaque panels; through twenty
+     pixels of blur it is nothing at all, and a pane with nothing behind
+     it is not glass, it is grey paint. */
+  opacity: .5; filter: blur(30px);
   animation: drift 44s var(--ease-bothways) infinite;
+}
+
+/* A second, slower field running the other way.  One drifting wash reads
+   as a gradient that happens to move; two at different speeds read as
+   depth, because the eye gets parallax out of them and parallax is the
+   cheapest depth cue there is. */
+.shell::after {
+  content: ""; position: absolute; inset: -30%; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(30% 34% at 68% 18%,
+      color-mix(in srgb, var(--purple) 60%, transparent), transparent 72%),
+    radial-gradient(26% 30% at 18% 82%,
+      color-mix(in srgb, var(--blue) 50%, transparent), transparent 72%);
+  opacity: .32; filter: blur(54px);
+  animation: drift-slow 71s var(--ease-bothways) infinite;
+}
+@keyframes drift-slow {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1.04); }
+  50%      { transform: translate3d(-3%, 3%, 0) scale(1); }
 }
 @keyframes drift {
   0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
@@ -194,8 +295,13 @@ code { font-family: var(--mono); font-size: .92em;
 }
 
 .sidebar {
-  background: var(--bg-2);
-  border-right: 1px solid var(--line);
+  background: var(--glass-deep);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border-right: 1px solid var(--rim);
+  /* The inset line on the inner edge is the thickness of the sheet: it is
+     what stops a translucent column reading as a hole in the page. */
+  box-shadow: inset -1px 0 0 var(--rim-low), 1px 0 30px -16px rgba(0,0,0,.6);
   display: flex; flex-direction: column; padding: 0 12px 12px;
   overflow-y: auto;
 }
@@ -286,9 +392,12 @@ nav { position: relative; }
 .topbar {
   height: var(--topbar); flex: none;
   display: flex; align-items: center; gap: 10px;
-  padding: 0 22px; border-bottom: 1px solid var(--line);
-  background: color-mix(in srgb, var(--bg-2) 82%, transparent);
-  backdrop-filter: blur(10px); position: sticky; top: 0; z-index: 20;
+  padding: 0 22px; border-bottom: 1px solid var(--rim);
+  background: var(--glass-deep);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: inset 0 -1px 0 var(--rim-low), 0 12px 28px -24px rgba(0,0,0,.9);
+  position: sticky; top: 0; z-index: 20;
 }
 .ttl h1 { font-size: 19px; letter-spacing: -.02em; }
 .ttl p { margin: 0; font-size: 12px; color: var(--ink-3); }
@@ -380,13 +489,45 @@ nav { position: relative; }
 
 /* ---------------------------------------------------------------- panels */
 
+/* A pane of glass: the room blurred behind it, a lit top edge, a dark
+   refracted bottom one, and enough shadow under it to say it is not
+   touching the page.
+
+   overflow:hidden has to stay -- tables and charts are clipped by it --
+   so the rim cannot be a pseudo-element that leaks outside the box; it is
+   done with inset shadows, which cost nothing and clip for free. */
 .panel {
-  background: var(--panel); border: 1px solid var(--line);
-  border-radius: var(--r); box-shadow: var(--shadow); overflow: hidden;
+  position: relative; isolation: isolate;
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--rim);
+  border-radius: var(--r);
+  box-shadow: var(--shadow-glass),
+              inset 0 1px 0 var(--rim-top),
+              inset 0 -1px 0 var(--rim-low);
+  overflow: hidden;
+  transition: box-shadow var(--t-base) var(--ease),
+              border-color var(--t-base) var(--ease),
+              transform var(--t-base) var(--ease-spring);
 }
+
+/* The sheen: a soft band of light lying across the top of the pane, as
+   if a window were above and to the left.  Fixed rather than following
+   the pointer, because a highlight that chases the mouse across a page
+   of numbers is a toy, and this has to be readable all day. */
+.panel::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    linear-gradient(160deg, var(--sheen) 0%, transparent 42%),
+    radial-gradient(120% 68% at 18% -10%, var(--sheen), transparent 62%);
+  opacity: .85;
+}
+
 .panel > header {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  padding: 13px 16px; border-bottom: 1px solid var(--line);
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--rim);
 }
 .panel > header h2 { font-size: 13.5px; letter-spacing: -.005em; }
 .panel > header .sub { font-size: 11.5px; color: var(--ink-3); }
@@ -397,14 +538,22 @@ nav { position: relative; }
 
 /* ------------------------------------------------------------------ kpis */
 
-.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px,1fr)); gap: 14px; }
+/* The depth the cards move in.  Without a perspective on the parent a
+   translate3d up the z axis is just a number that does nothing. */
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px,1fr));
+  gap: 14px; perspective: 1100px; }
 .kpis.four { grid-template-columns: repeat(auto-fit, minmax(180px,1fr)); }
 
 .kpi {
   position: relative; overflow: hidden; cursor: pointer;
   padding: 15px 16px 14px; border-radius: var(--r);
-  border: 1px solid var(--line); background: var(--panel);
-  box-shadow: var(--shadow);
+  border: 1px solid var(--rim);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-glass),
+              inset 0 1px 0 var(--rim-top),
+              inset 0 -1px 0 var(--rim-low);
   transition: transform var(--t-base) var(--ease-spring),
               border-color var(--t-fast) var(--ease),
               box-shadow var(--t-base) var(--ease);
@@ -420,8 +569,18 @@ nav { position: relative; }
   background: radial-gradient(circle, var(--c, var(--blue)), transparent 68%);
   opacity: .11; transition: opacity var(--t-base) var(--ease);
 }
-.kpi:hover { transform: translateY(-2px); border-color: var(--line-2); }
-.kpi:hover::after { opacity: .2; }
+/* Rising towards the reader rather than merely up the page: the lift and
+   the shadow growing together are what make it read as distance instead
+   of the card sliding.  translateZ needs the perspective set on .kpis. */
+.kpi:hover {
+  transform: translate3d(0, calc(var(--lift) * -1), 0) scale(1.012);
+  border-color: color-mix(in srgb, var(--c, var(--blue)) 38%, var(--rim));
+  box-shadow: var(--shadow-float),
+              inset 0 1px 0 var(--rim-top),
+              inset 0 -1px 0 var(--rim-low),
+              0 0 0 1px color-mix(in srgb, var(--c, var(--blue)) 16%, transparent);
+}
+.kpi:hover::after { opacity: .26; }
 .kpi:focus-visible { outline: 2px solid var(--c); outline-offset: 2px; }
 .kpi.flat { cursor: default; }
 .kpi.flat:hover { transform: none; }
@@ -819,8 +978,12 @@ dl.kv dt:last-of-type, dl.kv dd:last-of-type { border-bottom: 0; }
 .drawer {
   position: fixed; top: 0; right: 0; bottom: 0; width: 460px; max-width: 92vw;
   z-index: 100; display: flex; flex-direction: column;
-  background: var(--bg-2); border-left: 1px solid var(--line);
-  box-shadow: -24px 0 60px -30px rgba(0,0,0,.85);
+  background: var(--glass-deep);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border-left: 1px solid var(--rim);
+  box-shadow: -24px 0 60px -30px rgba(0,0,0,.85),
+              inset 1px 0 0 var(--rim-top);
   /* Leaves and arrives on a long curve, and is very slightly narrower on
      the way in, so that it reads as a panel swinging into place rather
      than a rectangle being pushed across the screen. */
@@ -1012,7 +1175,7 @@ body.offline #aibtn, body.offline #refresh, body.offline .out { display: none; }
   /* Nothing here may be left mid-blur: a stopped animation still has to
      end up at something legible. */
   .content.in, .drawer, .scrim { filter: none; backdrop-filter: none; }
-  .shell::before { animation: none; }
+  .shell::before, .shell::after { animation: none; }
   ::view-transition-old(canvas), ::view-transition-new(canvas) { animation: none; }
   .fn-band, .fn-tick { transform: scaleY(1); }
   .hm { opacity: 1; }

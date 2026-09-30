@@ -665,7 +665,7 @@ function cyclePanel() {
           ${mine ? `<p class="cymine">${mine}</p>` : ""}
         </div>
         ${!window && opens !== null ? `<div class="cycount">
-          <b>${opens}</b><i>days until<br>${esc(c.next)} opens</i></div>` : ""}
+          <b>${opens}</b><i>days until <br>${esc(c.next)} opens</i></div>` : ""}
       </div>
     </div>
   </div>`;
