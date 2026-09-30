@@ -1068,7 +1068,42 @@ def ai_models(email: str = "") -> dict:
 # have not changed it.  These live in the vault with their keys rather than
 # in the browser, so that signing in from a second machine finds the same
 # dashboard rather than the defaults again.
+THEMES = ("dark", "midnight", "graphite", "ocean", "light", "paper")
+SKINS = ("classic", "liquid")
+WALLS = ("", "aurora", "dusk", "tide", "forest", "ember", "slate", "custom")
+
+
+def clean_look(raw) -> dict:
+    """The appearance settings, or None if there were none worth keeping.
+
+    Read one field at a time against a list of what exists rather than
+    stored as it arrived: this is a blob a browser posts, it comes straight
+    back out into a data- attribute and a CSS custom property, and the way
+    that goes wrong is somebody posting a value that was never on the menu.
+    """
+    if not isinstance(raw, dict):
+        return None
+    out = {}
+    if raw.get("skin") in SKINS:
+        out["skin"] = raw["skin"]
+    if raw.get("wall") in WALLS:
+        out["wall"] = raw["wall"]
+    clarity = raw.get("clarity")
+    if clarity is None:
+        out["clarity"] = None
+    else:
+        try:
+            out["clarity"] = max(18, min(96, int(clarity)))
+        except (TypeError, ValueError):
+            pass
+    return out or None
+
+
 PREF_DEFAULTS = {"auto": None, "interval": None, "theme": "",
+                 # Which palette, how heavy the glass, which wallpaper.  An
+                 # uploaded wallpaper is not in here: that is a file off one
+                 # device and it stays in the browser it was chosen in.
+                 "look": None,
                  # Off, and not None: the others fall back to what the
                  # deployment was started with, and there is no deployment
                  # default for writing to somebody unasked.  Nobody gets mail
@@ -2412,8 +2447,11 @@ class Handler(BaseHTTPRequestHandler):
             form = self.body()
             patch = {}
             theme = (form.get("theme") or "").strip().lower()
-            if theme in ("dark", "light"):
+            if theme in THEMES:
                 patch["theme"] = theme
+            look = clean_look(form.get("look"))
+            if look is not None:
+                patch["look"] = look
             if form.get("merged_mail") is not None:
                 patch["merged_mail"] = bool(form["merged_mail"])
             if not patch:

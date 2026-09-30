@@ -40,9 +40,21 @@
      up with the blur because averaging a lot of pixels together washes the
      colour out, and lifting it back is what keeps the tint underneath from
      turning grey. */
-  --glass:      color-mix(in srgb, var(--panel) 46%, transparent);
-  --glass-deep: color-mix(in srgb, var(--bg-2) 68%, transparent);
-  --glass-soft: color-mix(in srgb, var(--panel-2) 62%, transparent);
+     One number drives all three, so Settings can offer a single slider
+     called Transparency rather than three that have to be kept in step.
+     The deeper surfaces stay a fixed distance more solid than the panels,
+     and the clamps stop either end of the slider from reaching a pane you
+     cannot read through or one that is not glass at all. */
+  --glass-pc: 46%;
+  --glass-up:  22%;   /* how much more solid the deep surfaces sit */
+  --glass-mid: 16%;
+  --glass:      color-mix(in srgb, var(--panel) var(--glass-pc), transparent);
+  --glass-deep: color-mix(in srgb, var(--bg-2)
+                  clamp(26%, calc(var(--glass-pc) + var(--glass-up)), 97%),
+                  transparent);
+  --glass-soft: color-mix(in srgb, var(--panel-2)
+                  clamp(24%, calc(var(--glass-pc) + var(--glass-mid)), 96%),
+                  transparent);
   --glass-blur: saturate(168%) blur(20px);
   --glass-thin: saturate(140%) blur(10px);
 
@@ -146,9 +158,9 @@ html[data-theme="light"] {
      through.  The rim flips: on a dark page the lit edge is white, here
      the pane is already white and what reads as an edge is the shadow
      side of it. */
-  --glass:      color-mix(in srgb, var(--panel) 82%, transparent);
-  --glass-deep: color-mix(in srgb, var(--bg-2) 86%, transparent);
-  --glass-soft: color-mix(in srgb, var(--panel-2) 74%, transparent);
+  --glass-pc: 82%;
+  --glass-up:   4%;
+  --glass-mid: -8%;
   --glass-blur: saturate(150%) blur(20px);
   --glass-thin: saturate(130%) blur(10px);
 
@@ -166,6 +178,160 @@ html[data-theme="light"] {
     0 18px 38px -18px rgba(16,22,34,.22),
     0 52px 92px -48px rgba(16,22,34,.34);
 }
+
+/* The other palettes.
+
+   Each says only what it changes, so the dark theme above stays the one
+   place the shape of a colour is decided and these are readings of it.
+   None of them touches the six status colours: green means landed on every
+   one of them, and a theme that made that a judgement call would be a
+   theme that lied. */
+
+/* Nearly black, with the blue pulled out of the greys.  For a room with
+   the lights off, and the one that suits a photograph behind it best. */
+html[data-theme="midnight"] {
+  --bg: #04060a; --bg-2: #070a10; --panel: #0b0f16; --panel-2: #131925;
+  --panel-3: #1b2331; --line: #1a2130; --line-2: #26303f;
+  --ink: #edf1f8; --ink-2: #94a2b8; --ink-3: #5e6b80;
+  --glass-pc: 40%;
+}
+
+/* Neutral: no blue in it at all, which is the point.  The status colours
+   carry more against a grey that is not competing with them. */
+html[data-theme="graphite"] {
+  --bg: #0e0e0f; --bg-2: #121213; --panel: #171718; --panel-2: #202022;
+  --panel-3: #2a2a2d; --line: #272729; --line-2: #333338;
+  --ink: #ededee; --ink-2: #a2a2a7; --ink-3: #6e6e74;
+  --glass-pc: 48%;
+}
+
+/* Deep blue-green, the colour of the terminal most of this work happens
+   in.  Warmer than midnight without going anywhere near brown. */
+html[data-theme="ocean"] {
+  --bg: #061418; --bg-2: #08191e; --panel: #0c2027; --panel-2: #123039;
+  --panel-3: #1a414d; --line: #17353f; --line-2: #224b58;
+  --ink: #e6f3f5; --ink-2: #93b3bb; --ink-3: #5f7d86;
+  --glass-pc: 44%;
+}
+
+/* Paper, for reading in daylight: the light theme warmed up and taken off
+   pure white, which is the part of a light theme that tires people out. */
+html[data-theme="paper"] {
+  --bg: #f6f3ec; --bg-2: #efebe1; --panel: #fffdf8; --panel-2: #f2eee4;
+  --panel-3: #e7e1d3; --line: #e0d9c9; --line-2: #cfc6b2;
+  --ink: #23201a; --ink-2: #5f594c; --ink-3: #8b8474;
+  --glass-pc: 84%; --glass-up: 4%; --glass-mid: -8%;
+  --rim: rgba(35,32,26,.06); --rim-top: rgba(255,255,255,.8);
+  --rim-low: rgba(35,32,26,.05); --sheen: rgba(255,255,255,.5);
+  --shadow-glass:
+    0 1px 1px rgba(60,50,30,.05),
+    0 10px 24px -14px rgba(60,50,30,.2),
+    0 34px 64px -40px rgba(60,50,30,.28);
+  --shadow-float:
+    0 2px 4px rgba(60,50,30,.07),
+    0 18px 38px -18px rgba(60,50,30,.2),
+    0 52px 92px -48px rgba(60,50,30,.3);
+}
+
+/* The heavier glass, for anybody who wants it: more blur, more saturation
+   to put back what the blur takes out, a brighter lit edge and corners
+   rounded the way a phone rounds them.  It is off by default -- twenty
+   pixels of blur under every panel is a real cost on a laptop, and this
+   asks for half as much again. */
+html[data-skin="liquid"] {
+  --glass-blur: saturate(200%) blur(32px);
+  --glass-thin: saturate(170%) blur(17px);
+  --rim-top: rgba(255,255,255,.44);
+  --rim: rgba(255,255,255,.16);
+  --sheen: rgba(255,255,255,.13);
+  --r: 20px; --r-sm: 13px;
+  --lift: 5px;
+}
+
+html[data-skin="liquid"][data-theme="light"],
+html[data-skin="liquid"][data-theme="paper"] {
+  --rim-top: rgba(255,255,255,.95);
+  --rim: rgba(16,22,34,.075);
+  --sheen: rgba(255,255,255,.7);
+}
+
+/* The wallpaper, behind everything and never scrolling with it.
+
+   A fixed layer of its own rather than a background on the page, because
+   an uploaded photograph needs a veil over it before text can sit on top,
+   and a veil is a second layer whichever way it is done.  Off unless
+   somebody has chosen one: the page paints its own colour as before. */
+#wall { display: none; }
+
+html[data-wall] #wall {
+  display: block; position: fixed; inset: 0; z-index: -3;
+  background-position: center; background-size: cover;
+  background-repeat: no-repeat;
+  background-image: var(--wall, none);
+}
+
+/* What makes the rest legible.  Tied to the transparency slider by hand
+   rather than by formula: the clearer the panels are asked to be, the more
+   of this is needed, and the relationship is not a straight line. */
+html[data-wall] #wall::after {
+  content: ""; position: absolute; inset: 0;
+  background: color-mix(in srgb, var(--bg) var(--veil, 62%), transparent);
+}
+
+html[data-wall] body { background-color: transparent; background-image: none; }
+
+/* The wallpapers that come with it.
+
+   Gradients rather than photographs, and deliberately: a handful of JPEGs
+   would be a megabyte in the repository, somebody else's copyright to keep
+   track of, and four more requests on first paint.  These cost nothing,
+   scale to any screen without going soft, and being built out of the
+   theme's own colours they suit every palette rather than fighting four of
+   them.  Anybody who wants a photograph can put their own there. */
+:root {
+  --wp-aurora:
+    radial-gradient(58% 44% at 14% 8%, #4c8dff 0%, transparent 62%),
+    radial-gradient(48% 40% at 84% 12%, #2dd4bf 0%, transparent 60%),
+    radial-gradient(60% 52% at 72% 88%, #a371f7 0%, transparent 64%),
+    linear-gradient(160deg, #0b1020, #0a1a22);
+  --wp-dusk:
+    radial-gradient(64% 50% at 78% 10%, #f0a868 0%, transparent 62%),
+    radial-gradient(56% 46% at 20% 26%, #d3596f 0%, transparent 60%),
+    radial-gradient(70% 60% at 40% 96%, #3b2a63 0%, transparent 66%),
+    linear-gradient(170deg, #1d1230, #0d0a1c);
+  --wp-tide:
+    radial-gradient(60% 46% at 10% 18%, #1d7fa8 0%, transparent 62%),
+    radial-gradient(52% 44% at 88% 34%, #2dd4bf 0%, transparent 60%),
+    radial-gradient(64% 56% at 56% 98%, #0f4c5c 0%, transparent 66%),
+    linear-gradient(155deg, #071a22, #04121a);
+  --wp-forest:
+    radial-gradient(56% 44% at 20% 12%, #3fb950 0%, transparent 60%),
+    radial-gradient(50% 42% at 82% 26%, #2dd4bf 0%, transparent 58%),
+    radial-gradient(66% 58% at 46% 96%, #14532d 0%, transparent 66%),
+    linear-gradient(165deg, #0a1a12, #06120c);
+  --wp-ember:
+    radial-gradient(58% 46% at 84% 14%, #f85149 0%, transparent 60%),
+    radial-gradient(52% 44% at 16% 30%, #e3a008 0%, transparent 58%),
+    radial-gradient(68% 58% at 52% 98%, #5b1d1d 0%, transparent 66%),
+    linear-gradient(168deg, #1c0d0b, #110705);
+  --wp-slate:
+    radial-gradient(60% 48% at 24% 10%, #46536b 0%, transparent 62%),
+    radial-gradient(54% 44% at 86% 30%, #5b6b85 0%, transparent 60%),
+    radial-gradient(66% 56% at 50% 98%, #1e2430 0%, transparent 66%),
+    linear-gradient(160deg, #141922, #0b0e14);
+}
+
+html[data-wall="aurora"] { --wall: var(--wp-aurora); }
+html[data-wall="dusk"]   { --wall: var(--wp-dusk); }
+html[data-wall="tide"]   { --wall: var(--wp-tide); }
+html[data-wall="forest"] { --wall: var(--wp-forest); }
+html[data-wall="ember"]  { --wall: var(--wp-ember); }
+html[data-wall="slate"]  { --wall: var(--wp-slate); }
+
+/* Uploaded: the image is on the element from script, since it is a data
+   URL a stylesheet cannot know about. Cover, so a photograph of any shape
+   fills the screen rather than tiling. */
+html[data-wall="custom"] #wall { background-image: var(--wall-custom, none); }
 
 * { box-sizing: border-box; }
 
@@ -1312,6 +1478,61 @@ mark { background: color-mix(in srgb, var(--amber) 34%, transparent);
 .intervalrow .unit { font-size: 12.5px; color: var(--ink-3); }
 .presets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .presets .chip { padding: 3px 11px; font-size: 12px; }
+
+/* ------------------------------------------------------- appearance
+
+   The wallpapers are shown as what they are.  A list of the words
+   "Aurora, Dusk, Tide" tells nobody anything; the same six as swatches
+   are picked from without reading a single one. */
+.walls { display: grid; gap: 9px; margin-top: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)); }
+
+.wsw { position: relative; height: 54px; padding: 0; cursor: pointer;
+  border-radius: 10px; border: 1px solid var(--line);
+  background-size: cover; background-position: center;
+  overflow: hidden; color: var(--ink);
+  transition: transform var(--t-quick) var(--ease),
+              border-color var(--t-quick) var(--ease),
+              box-shadow var(--t-quick) var(--ease); }
+.wsw:hover { transform: translateY(-2px); border-color: var(--line-2); }
+.wsw:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.wsw.on { border-color: var(--blue); box-shadow: var(--glow); }
+
+/* The name sits on the swatch rather than under it, so the grid stays a
+   grid of pictures.  Its own scrim, because it has to be readable on six
+   different pictures and on whatever somebody uploads. */
+.wsw span { position: absolute; left: 0; right: 0; bottom: 0;
+  padding: 11px 6px 4px; font-size: 10.5px; font-weight: 600;
+  text-align: center; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.7);
+  background: linear-gradient(transparent, rgba(0,0,0,.55)); }
+
+.wsw[data-w=""] { background: var(--panel-2); }
+.wsw[data-w=""] span { color: var(--ink-2); text-shadow: none;
+  background: none; }
+.wsw[data-w="aurora"] { background-image: var(--wp-aurora); }
+.wsw[data-w="dusk"]   { background-image: var(--wp-dusk); }
+.wsw[data-w="tide"]   { background-image: var(--wp-tide); }
+.wsw[data-w="forest"] { background-image: var(--wp-forest); }
+.wsw[data-w="ember"]  { background-image: var(--wp-ember); }
+.wsw[data-w="slate"]  { background-image: var(--wp-slate); }
+.wsw[data-w="custom"] { background-image: var(--wall-custom, none);
+  background-color: var(--panel-2); }
+
+/* A file input cannot be styled, so the button is a label pointing at a
+   hidden one.  It is still a real input: keyboard and screen reader reach
+   it through the label exactly as they would a button. */
+/* Named against .field too, or the rule that makes every label in a field
+   a small bold caption turns this button into one. */
+.field label.upload, .upload {
+  display: inline-block; width: auto; margin: 9px 7px 0 0;
+  font-size: 12px; font-weight: 500; color: inherit; cursor: pointer; }
+.upload input { display: none; }
+
+.slider { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+.slider input[type="range"] { flex: 1; width: auto; padding: 0;
+  accent-color: var(--blue); background: none; border: 0; }
+.slider output { flex: none; width: 42px; text-align: right;
+  font-variant-numeric: tabular-nums; font-size: 12px; color: var(--ink-2); }
 /* ================================================================ ledger */
 
 .ledger { display: flex; flex-direction: column; }

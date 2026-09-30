@@ -2239,18 +2239,7 @@ function setGeneral() {
             <code>PATCHVANE_OWNER</code>, or, if nobody said, the first
             account to sign in here.`)}</dd>` : ""}
       </dl>
-      <div class="field">
-        <label>Appearance</label>
-        <div class="presets">
-          ${["dark", "light"].map((t) => `<button class="chip ${
-            (document.documentElement.dataset.theme || "dark") === t ? "on" : ""}"
-            ${act(setTheme, t)}>${t === "dark" ? "Dark" : "Light"}</button>`).join("")}
-        </div>
-        <p class="hint">Remembered against your account.
-        ${info("theme", `So it follows you to another machine rather than
-        living in this browser alone, the way a setting kept in the browser
-        would.`)}</p>
-      </div>
+      ${appearanceBox()}
     </div></div>
   </div>`;
 }
@@ -5033,6 +5022,21 @@ function interacting() {
 /* The theme the server is holding for this person, applied once when the
    first status arrives. Only then: after that this machine's own toggle is
    the newer opinion, and adopting the saved one again would undo it. */
+/* The appearance the server is holding, taken once for the same reason the
+   theme is: after the first status arrives, this machine's own Settings are
+   the newer opinion. The wallpaper it names may be one whose image lives in
+   another browser, which applyLook falls back from on its own. */
+function adoptLook(saved) {
+  if (S.lookSettled || !saved) return;
+  S.lookSettled = true;
+  const now = look();
+  if (["skin", "wall", "clarity"].every((k) => now[k] === saved[k])) return;
+  Object.assign(now, saved);
+  try { localStorage.setItem(LOOK_KEY, JSON.stringify(now)); } catch (e) {}
+  applyLook();
+  render();
+}
+
 function adoptTheme(theme) {
   if (S.themeSettled || !theme) return;
   S.themeSettled = true;
@@ -5161,6 +5165,256 @@ async function applyInterval() {
 
 /* ------------------------------------------------------------------ boot */
 
+/* ------------------------------------------------------------ appearance
+
+   Four things, and every one of them starts where it started before any of
+   this existed: the dark palette, the lighter glass, no wallpaper.  Nobody
+   who does not open Settings sees any change at all, which is the whole
+   arrangement -- a tracker somebody reads all day should not have decided
+   for them that it wants to be looked at.
+
+   The palette follows the account, because it is a preference about the
+   product and the same person on another machine means the same thing by
+   it.  An uploaded wallpaper does not: it is a file off one device, it is
+   megabytes, and sending it to a server so it can come back again is a
+   cost nobody asked for.  So the picture stays in the browser it was
+   chosen in, and only the fact that one was chosen travels. */
+
+function appearanceBox() {
+  const L = look();
+  const theme = document.documentElement.dataset.theme || "dark";
+  const clear = L.clarity == null ? "" : L.clarity;
+  const shown = L.clarity == null ? "Auto" : L.clarity + "%";
+  const custom = wallImage();
+
+  const swatch = ([key, name]) =>
+    `<button class="wsw ${L.wall === key ? "on" : ""}" data-w="${esc(key)}"
+      ${act(setWall, key)} aria-pressed="${L.wall === key}"
+      ><span>${esc(name)}</span></button>`;
+
+  return `
+  <div class="field">
+    <label>Theme</label>
+    <div class="presets">
+      ${THEMES.map(([k, name]) => `<button class="chip ${
+        theme === k ? "on" : ""}" ${act(setTheme, k)}>${esc(name)}</button>`)
+        .join("")}
+    </div>
+    <p class="hint">Remembered against your account.
+      ${info("theme", `So it follows you to another machine rather than
+      living in this browser alone, the way a setting kept in the browser
+      would. None of the six changes what a colour means: green is a patch
+      that landed on every one of them.`)}</p>
+  </div>
+
+  <div class="field">
+    <label>Glass</label>
+    <div class="presets">
+      ${SKINS.map(([k, name]) => `<button class="chip ${
+        L.skin === k ? "on" : ""}" ${act(setSkin, k)}>${esc(name)}</button>`)
+        .join("")}
+    </div>
+    <p class="hint">Liquid blurs harder and rounds the corners further.
+      ${info("skin", `Blur is the expensive part of glass: the browser has
+      to read what is behind every pane and average it, on every frame that
+      moves. Classic is the lighter of the two and is what this starts on.
+      On an older laptop, or a long patch list, it is the one to stay on.`)}</p>
+  </div>
+
+  <div class="field">
+    <label>Wallpaper</label>
+    <div class="walls">
+      ${WALLS.map(swatch).join("")}
+      ${custom ? swatch(["custom", "Yours"]) : ""}
+    </div>
+    <label class="btn ghost sm upload">
+      ${custom ? "Replace image" : "Upload an image"}
+      <input type="file" accept="image/*" ${acte("change", wallUpload)}>
+    </label>
+    ${custom ? `<button class="btn ghost sm" ${act(clearWall)}
+      >Remove yours</button>` : ""}
+    <p class="hint">The six above are drawn, not photographs, so they cost
+      nothing to load and suit every palette.
+      ${info("wall", `An image you upload is scaled down and kept in this
+      browser, not sent anywhere: it is your file, it is megabytes, and a
+      server has no use for it. That does mean it is on this machine only,
+      and that clearing site data takes it with it.`)}</p>
+  </div>
+
+  <div class="field">
+    <label>Transparency</label>
+    <div class="slider">
+      <input type="range" min="18" max="96" step="1"
+        value="${clear === "" ? 46 : clear}"
+        aria-label="How much shows through the panels"
+        ${actv("input", setClarity)}>
+      <output>${esc(shown)}</output>
+    </div>
+    <p class="hint">How much of what is behind a panel comes through it.
+      ${info("clarity", `Lower is clearer. Text has to stay readable on top
+      of whatever is behind it, so the far end of this is further than most
+      pages will want, and over a photograph the veil behind everything is
+      thickened to compensate.`)}</p>
+  </div>`;
+}
+
+const THEMES = [
+  ["dark", "Dark"], ["midnight", "Midnight"], ["graphite", "Graphite"],
+  ["ocean", "Ocean"], ["light", "Light"], ["paper", "Paper"],
+];
+
+/* Which of them are light.  The header button is a two-way switch across
+   six palettes, so it has to ask what sort of place it is in rather than
+   compare against "dark": from Graphite it should go to the light one,
+   and from Paper back to the dark one. */
+const LIGHT = new Set(["light", "paper"]);
+
+const SKINS = [["classic", "Classic"], ["liquid", "Liquid"]];
+
+const WALLS = [
+  ["", "None"], ["aurora", "Aurora"], ["dusk", "Dusk"], ["tide", "Tide"],
+  ["forest", "Forest"], ["ember", "Ember"], ["slate", "Slate"],
+];
+
+const LOOK_KEY = "patchvane-look";
+/* Kept apart from the rest: it is the one that is megabytes, and reading
+   the small settings should not mean parsing an image out of them. */
+const WALL_KEY = "patchvane-wallpaper";
+
+const LOOK_BASE = { skin: "classic", wall: "", clarity: null };
+
+function look() {
+  if (!S.look) {
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem(LOOK_KEY) || "{}"); }
+    catch (e) { saved = {}; }
+    S.look = Object.assign({}, LOOK_BASE, saved);
+  }
+  return S.look;
+}
+
+function wallImage() {
+  try { return localStorage.getItem(WALL_KEY) || ""; } catch (e) { return ""; }
+}
+
+function applyLook() {
+  const L = look(), root = document.documentElement;
+
+  if (L.skin === "liquid") root.dataset.skin = "liquid";
+  else delete root.dataset.skin;
+
+  /* "Custom" with nothing stored is what a browser looks like after its
+     storage was cleared, or on the second machine.  Fall back rather than
+     show a wallpaper layer with no wallpaper in it. */
+  const custom = wallImage();
+  const wall = (L.wall === "custom" && !custom) ? "" : L.wall;
+  if (wall) root.dataset.wall = wall; else delete root.dataset.wall;
+  if (custom) root.style.setProperty("--wall-custom", `url("${custom}")`);
+  else root.style.removeProperty("--wall-custom");
+
+  if (L.clarity == null) root.style.removeProperty("--glass-pc");
+  else root.style.setProperty("--glass-pc", L.clarity + "%");
+
+  /* How much of the wallpaper to cover so the page can be read on top of
+     it. Clearer panels need more of this, since their text is sitting on
+     the picture rather than on them -- but not much more: the first try at
+     this was heavy enough to turn every wallpaper back into the plain dark
+     page, which is a way of having the feature without giving it. */
+  const clear = L.clarity == null ? 46 : L.clarity;
+  /* A photograph gets a little more of it than the drawn six do. Those
+     were built to be dark where the text is; somebody's own picture has a
+     white sky in it somewhere, and that is where the heading lands. */
+  const veil = 52 - clear * 0.42 + (wall === "custom" ? 11 : 0);
+  root.style.setProperty("--veil",
+    Math.max(10, Math.min(62, Math.round(veil))) + "%");
+}
+
+function saveLook(patch) {
+  Object.assign(look(), patch);
+  try { localStorage.setItem(LOOK_KEY, JSON.stringify(look())); }
+  catch (e) { /* nothing kept, but the page still looks right until reload */ }
+  applyLook();
+  post("/api/prefs", { look: look() }).catch(() => {});
+}
+
+function setSkin(next) { saveLook({ skin: next }); render(); }
+function setWall(next) { saveLook({ wall: next }); render(); }
+
+/* No render: this one is dragged, and rebuilding the page under the thumb
+   would take the thumb with it. The reading beside it is moved by hand. */
+function setClarity(value) {
+  const n = Math.round(Number(value) || 0);
+  saveLook({ clarity: n });
+  const out = document.querySelector(".slider output");
+  if (out) out.textContent = n + "%";
+}
+
+function clearWall() {
+  try { localStorage.removeItem(WALL_KEY); } catch (e) { /* already gone */ }
+  saveLook({ wall: "" });
+  render();
+}
+
+/* An uploaded wallpaper, made small enough to keep.
+
+   Straight off a phone this is a twelve megapixel JPEG, and localStorage
+   is about five megabytes for everything this dashboard remembers.  It is
+   a background: it never needs more pixels than the widest screen it will
+   be stretched across, and nobody is going to examine it.  So it is drawn
+   into a canvas at a sane size and re-encoded, dropping the quality a step
+   at a time until it fits rather than guessing one number for every
+   photograph. */
+function wallUpload(el) {
+  const file = el.files && el.files[0];
+  if (!file) return;
+  if (!/^image\//.test(file.type)) {
+    toast("That file is not an image");
+    return;
+  }
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+
+  img.onload = () => {
+    URL.revokeObjectURL(url);
+    const max = 2560;
+    const scale = Math.min(1, max / Math.max(img.width, img.height));
+    const c = document.createElement("canvas");
+    c.width = Math.round(img.width * scale);
+    c.height = Math.round(img.height * scale);
+    c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+
+    let data = "";
+    for (const q of [0.82, 0.7, 0.58, 0.45, 0.32]) {
+      data = c.toDataURL("image/jpeg", q);
+      if (data.length < 3200000) break;
+    }
+    try {
+      localStorage.setItem(WALL_KEY, data);
+    } catch (e) {
+      toast("No room left to keep that image");
+      return;
+    }
+    saveLook({ wall: "custom" });
+    render();
+    toast("Wallpaper set");
+  };
+
+  img.onerror = () => {
+    URL.revokeObjectURL(url);
+    toast("That image could not be read");
+  };
+  img.src = url;
+}
+
+/* Not through transition(), and this is the one change on the page that
+   must not be.  A view transition works by holding a still picture of the
+   document over the top while it crossfades, and for as long as that
+   picture is up nothing underneath is drawn -- including the button that
+   was just pressed.  The moon would sit frozen for the length of the fade
+   and then appear as a sun, which is the one thing the animation exists to
+   avoid.  Changing the colours in place and letting the elements' own
+   transitions carry it gets the same crossfade and leaves the button
+   free to move. */
 function setTheme(next) {
   if (document.documentElement.dataset.theme === next) return;
   transition(() => {

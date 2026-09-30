@@ -63,6 +63,16 @@ function actv(evt, fn, ...args) {
   return `data-cmd="${id}" data-on="${evt}"`;
 }
 
+/* The same, on an event other than click, but handing over the element
+   rather than what is typed in it.  A file input is the case that needs
+   this: its value is a decorative path, and everything real about it is in
+   .files. */
+function acte(evt, fn, ...args) {
+  const id = "c" + (++CMD_N);
+  CMD.set(id, (el, e) => fn(...args, el, e));
+  return `data-cmd="${id}" data-on="${evt}"`;
+}
+
 function fire(e, want) {
   const el = e.target.closest ? e.target.closest("[data-cmd]") : null;
   if (!el || (el.dataset.on || "click") !== want) return;
