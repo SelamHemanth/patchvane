@@ -105,14 +105,53 @@
         <button class="who" id="whobtn" title="Account"
                 aria-haspopup="true" aria-expanded="false">
           <span class="avatar" id="avatar">&nbsp;</span>
+          <!-- On the picture rather than beside it: this is the only part
+               of the account button small screens keep. -->
+          <span class="nbadge hidden" id="nbadge"></span>
           <span id="userlabel" class="uname">&mdash;</span>
           <span class="dots">&#8942;</span>
         </button>
         <div class="whomenu hidden" id="whomenu" role="menu">
-          <button role="menuitem" data-who="profile">Profile</button>
-          <button role="menuitem" data-who="settings">Settings</button>
-          <button role="menuitem" data-who="signout">Sign out</button>
+          <!-- All four carry one, so the labels line up.  Drawn, like the
+               two buttons in the header: the glyphs for these are the sort
+               that render as a box on a machine without the font. -->
+          <button role="menuitem" data-who="notices">
+            <svg class="mi" viewBox="0 0 24 24" aria-hidden="true"
+                 focusable="false">
+              <path d="M18 8.5a6 6 0 1 0-12 0c0 5-2 6.5-2 6.5h16s-2-1.5-2-6.5"/>
+              <path d="M13.7 19a2 2 0 0 1-3.4 0"/>
+            </svg>Notifications
+            <span class="ntag hidden" id="ntag"></span>
+          </button>
+          <button role="menuitem" data-who="profile">
+            <svg class="mi" viewBox="0 0 24 24" aria-hidden="true"
+                 focusable="false">
+              <circle cx="12" cy="8.2" r="3.6"/>
+              <path d="M4.8 20a7.2 7.2 0 0 1 14.4 0"/>
+            </svg>Profile</button>
+          <button role="menuitem" data-who="settings">
+            <svg class="mi" viewBox="0 0 24 24" aria-hidden="true"
+                 focusable="false">
+              <!-- Sliders, not a cog: a cog at this size is a smudge, and
+                   the spoked circle that reads well is the sun on the
+                   button two along from here. -->
+              <path d="M4 7h10M18 7h2M4 12h3M11 12h9M4 17h8M16 17h4"/>
+              <circle cx="16" cy="7" r="2"/>
+              <circle cx="9" cy="12" r="2"/>
+              <circle cx="14" cy="17" r="2"/>
+            </svg>Settings</button>
+          <button role="menuitem" data-who="signout">
+            <svg class="mi" viewBox="0 0 24 24" aria-hidden="true"
+                 focusable="false">
+              <path d="M14.5 4.2H19a1 1 0 0 1 1 1v13.6a1 1 0 0 1-1 1h-4.5"/>
+              <path d="M10.2 8.2 14 12l-3.8 3.8M14 12H4"/>
+            </svg>Sign out</button>
         </div>
+        <!-- Hangs off the same corner as the account menu and is filled in
+             when it is opened: this is a list that changes between one
+             opening and the next, so there is nothing to put here. -->
+        <div class="noticebox hidden" id="noticebox" role="dialog"
+             aria-label="Notifications"></div>
       </div>
     </header>
 

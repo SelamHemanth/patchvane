@@ -31,6 +31,11 @@ const S = {
   inboxAsked: false,
   inboxPick: "",
   answer: {},
+  notices: [],
+  unread: 0,
+  announce: {},
+  people: [],
+  peopleAsked: false,
 };
 
 /* ------------------------------------------------------------- constants */
@@ -84,7 +89,7 @@ const NAV = [
    without opening anything. */
 function navList() {
   return (S.support || {}).owner
-    ? NAV.concat([["inbox", "Feedback", "\u270E"]])
+    ? NAV.concat([["inbox", "Admin", "\u2699"]])
     : NAV;
 }
 
@@ -574,7 +579,6 @@ function viewOverview() {
 
   return `
   ${shortfall}
-  ${cyclePanel()}
   ${roadPanel()}
   ${stalePanel()}
   ${ledgerPanel(book, work().length)}
@@ -622,98 +626,18 @@ function viewOverview() {
    what decides how to read everything else.  A patch that has sat unanswered
    for a fortnight is a worry at -rc5 and is simply the calendar during the
    merge window, when maintainers are sending pull requests to Linus and not
-   reading the list.  Told the date and left to work that out, nobody does. */
-/* Which piece of news this is. The phase and the tag together, so that a
-   new -rc, or the window opening, is a fresh notice and shows again rather
-   than staying hidden behind a dismissal of the last one. */
-function cycleNews(c) { return (c.phase || "") + ":" + (c.tag || ""); }
+   reading the list.  Told the date and left to work that out, nobody does.
 
-/* Shown once a session and then only if asked for, because it says the same
-   thing all week. Dismissing it puts it away until the tree moves on.
-
-   Whether it has already been seen is read once per page load: marking it
-   seen on every render would have it vanish under the reader the moment
-   anything else on the page redrew. */
-let CYCLE_SHOWING = null;
-
-function cycleHidden(c) {
-  const news = cycleNews(c);
-  if (CYCLE_SHOWING === news) return false;
-  try {
-    if (localStorage.getItem("patchvane-cycle-dismissed") === news) return true;
-    if (sessionStorage.getItem("patchvane-cycle-seen") === news) return true;
-    sessionStorage.setItem("patchvane-cycle-seen", news);
-  } catch (e) { /* private browsing: show it, that is the harmless way */ }
-  CYCLE_SHOWING = news;
-  return false;
-}
-
-function cycleDismiss() {
-  const c = (S.data || {}).cycle;
-  if (!c) return;
-  try {
-    localStorage.setItem("patchvane-cycle-dismissed", cycleNews(c));
-  } catch (e) { /* nothing to do: it goes for this page load either way */ }
-  CYCLE_SHOWING = null;
-  const el = document.querySelector(".panel.cycle");
-  if (el) el.remove();
-}
-
-function cyclePanel() {
-  const c = S.data.cycle;
-  if (!c || !c.phase) return "";
-  if (cycleHidden(c)) return "";
-  const window = c.phase === "merge-window";
-  const opens = days(c.opens);
-  /* Counted off the patches, not off the commit list, so this agrees with
-     the "sitting here" figure on the road below. The two differ whenever a
-     maintainer took an earlier version: the commit is filed under the
-     posting that landed, while the patch is counted at the version that
-     speaks for it. */
-  const queued = work().filter((p) => reached(p) === 3).length;
-
-  let head, note;
-  if (window) {
-    head = `The ${esc(c.next)} merge window is open.`;
-    note = `Maintainers are sending pull requests to Linus, not reading the
-      list. Quiet on anything you posted is the calendar, not a snub, and a
-      ping now lands in the worst possible week. It shuts
-      ${when(c.closes)}${c.estimated ? " or thereabouts" : ""}.`;
-  } else {
-    head = `${esc(c.tag)}. The merge window is shut.`;
-    note = `${esc(c.version)} is being stabilised, so maintainers are taking
-      fixes for it and queueing everything else for ${esc(c.next)}. Review is
-      running normally: silence on a patch this week is worth chasing.`;
-  }
-
-  /* What their own work is waiting for, in the same breath.  The count is
-     the whole point -- "the merge window opens on the 18th" is trivia until
-     it is 109 of your own commits moving. */
-  const mine = queued
-    ? `${plural(queued, "commit")} of yours ${queued === 1 ? "is" : "are"}
-       sitting in linux-next. ${queued === 1 ? "It reaches" : "They reach"}
-       mainline when the ${esc(c.next)} merge window opens${
-         window ? " \u2014 which is now" : `, ${when(c.opens)}`}.`
-    : "";
-
-  return `<div class="panel wide cycle ${window ? "open" : "shut"}" data-reveal>
-    <div class="body">
-      <div class="cyrow">
-        <span class="cymark" aria-hidden="true"></span>
-        <div class="cytx">
-          <h2>${head}</h2>
-          <p>${note}</p>
-          ${mine ? `<p class="cymine">${mine}</p>` : ""}
-        </div>
-        ${!window && opens !== null ? `<div class="cycount">
-          <b>${opens}</b><i>days until <br>${esc(c.next)} opens</i></div>` : ""}
-        <button class="cyshut" ${act(cycleDismiss)}
-          title="Put this away until the tree moves on"
-          aria-label="Dismiss this notice">&times;</button>
-      </div>
-    </div>
-  </div>`;
-}
+   This was a banner across the top of the overview.  It says the same
+   sentence for the whole week it is true, which is how something becomes
+   furniture, and a banner that has to be dismissed is a banner that was
+   shown too often.  The server raises it as a notification instead: once,
+   when the tree actually moves, and it sits in the list with everything
+   else until it is read.  What is left here is the one part that could not
+   move -- how many of this person's own commits the date applies to, which
+   moved.  How many of this person's commits the date applies to goes in
+   the notice too, counted on the server from the same per-patch figure the
+   road on the overview uses. */
 
 /* Whole days from today to a yyyy-mm-dd, or null if it is not one. */
 function days(iso) {
@@ -1945,7 +1869,95 @@ function viewInbox() {
       <p>Reports people send here go to whoever runs this deployment.</p>
       </div></div></div>`;
   }
-  return setInbox();
+  return announcePanel() + setInbox();
+}
+
+/* Sending word to the people using this deployment.
+
+   It writes into their notifications rather than mailing them, and that is
+   the whole point: a server being restarted on Saturday is worth a line in
+   the corner and is not worth an email, and a deployment that mails
+   everybody about maintenance is a deployment people filter.  What is
+   genuinely urgent -- an answer to something they reported -- already goes
+   by mail, from the panel below this one. */
+function announcePanel() {
+  loadPeople();
+  const d = S.announce || {};
+  const who = d.to || "*";
+  const people = S.people || [];
+  const said = (d.title || "").trim();
+
+  return `<div class="panel wide" data-reveal><div class="head">
+      <div><h2>Send word</h2>
+      <p class="sub">Lands in the notifications of whoever you pick, next
+      time their page polls. Nothing is mailed.</p></div>
+    </div>
+    <div class="body">
+      <div class="field">
+        <label for="anwho">Who gets it</label>
+        <select id="anwho" ${actv("change", setAnnounce, "to")}>
+          <option value="*" ${who === "*" ? "selected" : ""}>Everybody${
+            people.length ? ` \u2014 ${plural(people.length, "person",
+              "people")}` : ""}</option>
+          ${people.map((p) => `<option value="${esc(p.email)}" ${
+            who === p.email ? "selected" : ""}>${esc(p.email)}</option>`)
+            .join("")}
+        </select>
+      </div>
+      <div class="field">
+        <label for="antitle">Subject</label>
+        <input id="antitle" type="text" maxlength="160"
+               placeholder="Collection is paused this evening"
+               value="${esc(d.title || "")}"
+               ${actv("input", setAnnounce, "title")}>
+      </div>
+      <div class="field">
+        <label for="anbody">Anything more</label>
+        <textarea id="anbody" rows="3" maxlength="4000"
+                  placeholder="Optional. Shown under the subject, as written."
+                  ${actv("input", setAnnounce, "body")}>${
+          esc(d.body || "")}</textarea>
+      </div>
+      <div class="btnrow">
+        <button class="btn primary" id="ansend" ${act(sendAnnounce)}
+                ${said ? "" : "disabled"}>${who === "*"
+          ? "Send to everybody" : "Send"}</button>
+      </div>
+    </div></div>`;
+}
+
+function setAnnounce(field, value) {
+  S.announce = Object.assign({}, S.announce, { [field]: value });
+  /* The Send button turns on and off with the subject, and nothing else
+     here is worth redrawing a form somebody is typing into. */
+  const btn = $("ansend");
+  if (btn) btn.disabled = !(S.announce.title || "").trim();
+  if (field === "to") render();
+}
+
+async function sendAnnounce() {
+  const d = S.announce || {};
+  if (!(d.title || "").trim()) return;
+  try {
+    const r = await post("/api/notices/send", {
+      to: d.to || "*", title: d.title, body: d.body || "",
+    });
+    const body = await r.json();
+    if (!body.ok) throw new Error(body.error || "it was not sent");
+    S.announce = { to: d.to || "*" };
+    render();
+    toast(`Sent to ${plural(body.sent, "person", "people")}.`, "ok");
+  } catch (e) { toast(String(e.message || e), "bad"); }
+}
+
+async function loadPeople() {
+  if (S.peopleAsked) return;
+  S.peopleAsked = true;
+  try {
+    const r = await fetch("/api/people", { cache: "no-store" });
+    const body = await r.json();
+    if (body.ok) { S.people = body.people || []; render(); }
+  } catch (e) { /* the picker falls back to everybody, which is the default */ }
 }
 
 /* Everything everybody sent, and the way to answer it.
@@ -4529,8 +4541,7 @@ const VIEWS = {
   insights:    ["Insights", "activity, subsystems and trees", viewInsights],
   discover:    ["Discover", "anybody else's patches, and who to send yours to",
                 viewDiscover],
-  inbox:       ["Feedback", "what people sent you, and what you said back",
-                viewInbox],
+  inbox:       ["Admin", "reports to answer, and word to send out", viewInbox],
   settings:    ["Settings", "refresh, assistant and sources", viewSettings],
   profile:     ["Profile", "your account and what this server keeps", viewProfile],
 };
@@ -4716,6 +4727,112 @@ function toggleWhoMenu(want) {
   const open = want === undefined ? menu.classList.contains("hidden") : want;
   menu.classList.toggle("hidden", !open);
   $("whobtn").setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+/* ---------------------------------------------------------- notifications
+
+   Three things arrive here and they are deliberately not sorted into three
+   places: a patch reaching a tree, the kernel moving to a new -rc, and
+   whoever runs this server saying something.  All three are news about
+   work somebody did not have to go looking for, and a reader who has to
+   check three corners will check none of them.
+
+   The release note used to be a banner across the overview, on every
+   visit, for the week it was true.  It is the same sentence for seven days
+   running, which is the definition of something people stop seeing, so it
+   is a notice now: it arrives once and it can be dismissed for good. */
+
+const NOTICE_ICON = {
+  landed: "\u2713", release: "\u25F7", word: "\u2709",
+};
+
+function noticeRow(n) {
+  const mark = NOTICE_ICON[n.kind] || "\u2022";
+  const when = n.at ? ago(n.at) : "";
+  const body = n.body
+    ? `<p class="nbody">${esc(n.body)}</p>` : "";
+  const open = n.url
+    ? `<a class="nlink" href="${esc(n.url)}" target="_blank"
+          rel="noopener">Have a look</a>` : "";
+  return `<li class="notice ${n.read ? "" : "fresh"} k-${esc(n.kind || "")}">
+    <span class="nmark" aria-hidden="true">${mark}</span>
+    <div class="nmain">
+      <b>${esc(n.title || "")}</b>
+      ${body}
+      <span class="nwhen">${esc(when)}${open ? " \u00B7 " + open : ""}</span>
+    </div>
+  </li>`;
+}
+
+function noticePanel(rows) {
+  if (!rows.length) {
+    return `<div class="nhead"><b>Notifications</b></div>
+      <p class="nnone">Nothing yet. Patches reaching a tree, the release
+      cycle turning, and anything the owner of this server has to say all
+      turn up here.</p>`;
+  }
+  const read = rows.filter((n) => n.read).length;
+  return `<div class="nhead">
+      <b>Notifications</b>
+      ${read ? `<button class="nclear" ${act(clearNotices)}>Clear read</button>`
+             : ""}
+    </div>
+    <ul class="nlist">${rows.map(noticeRow).join("")}</ul>`;
+}
+
+/* Opening is the reading.  Asking somebody to tick off a list of things
+   that were only ever one line each would be inventing a chore; the mark
+   goes in as soon as it is on screen, and the ones that were unread keep
+   their flag for this one viewing so the reader can see what is new. */
+async function openNotices() {
+  const box = $("noticebox");
+  toggleWhoMenu(false);
+  box.innerHTML = `<div class="nhead"><b>Notifications</b></div>
+    <p class="nnone">Reading\u2026</p>`;
+  box.classList.remove("hidden");
+  try {
+    const r = await fetch("/api/notices", { credentials: "same-origin" });
+    const body = await r.json();
+    S.notices = body.rows || [];
+    box.innerHTML = noticePanel(S.notices);
+    if (body.unread) {
+      await post("/api/notices/read");
+      setUnread(0);
+    }
+  } catch (e) {
+    box.innerHTML = `<div class="nhead"><b>Notifications</b></div>
+      <p class="nnone">Could not reach the server.</p>`;
+  }
+}
+
+function toggleNotices(want) {
+  const box = $("noticebox");
+  const open = want === undefined ? box.classList.contains("hidden") : want;
+  if (open) openNotices();
+  else box.classList.add("hidden");
+}
+
+async function clearNotices() {
+  try {
+    await post("/api/notices/clear");
+    const r = await fetch("/api/notices", { credentials: "same-origin" });
+    S.notices = (await r.json()).rows || [];
+    $("noticebox").innerHTML = noticePanel(S.notices);
+  } catch (e) { toast("Could not clear those.", "bad"); }
+}
+
+/* The count in two places, because the account button is a picture on a
+   phone and a name on a desktop, and the menu item it belongs to is shut
+   most of the time. */
+function setUnread(n) {
+  S.unread = n = Number(n) || 0;
+  const badge = $("nbadge"), tag = $("ntag");
+  const shown = n > 99 ? "99+" : String(n);
+  badge.textContent = shown;
+  tag.textContent = shown;
+  badge.classList.toggle("hidden", !n);
+  tag.classList.toggle("hidden", !n);
+  $("whobtn").title = n ? `Account \u2014 ${n} unread` : "Account";
 }
 
 /* The one view that is not about the person looking at it, and so is the
@@ -5070,6 +5187,10 @@ async function pollStatus() {
     const was = S.status.running;
     S.status = st;
     adoptTheme(st.theme);
+    adoptLook(st.look);
+    /* Not while the panel is open: the poll marked them read a moment ago
+       and putting the number back would be arguing with the reader. */
+    if ($("noticebox").classList.contains("hidden")) setUnread(st.unread);
     chatBelongsToMe();
     if (S.data && st.generated && st.generated !== S.data.generated) {
       await load();
@@ -5480,6 +5601,9 @@ function toggleTheme() {
    gets closed, and nobody has to be told. */
 function keys(e) {
   if (e.key !== "Escape") return;
+  if (!$("noticebox").classList.contains("hidden")) {
+    toggleNotices(false); return;
+  }
   if ($("thread").classList.contains("open")) { closeThread(); return; }
   if ($("ai").classList.contains("open")) { closeAI(); return; }
   if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) e.target.blur();
@@ -5527,10 +5651,23 @@ async function boot() {
     if (!b) return;
     toggleWhoMenu(false);
     if (b.dataset.who === "signout") signOut();
-    else go(b.dataset.who);
+    else if (b.dataset.who === "notices") {
+      /* Or the same click would reach the handler below and shut what it
+         just opened. */
+      e.stopPropagation();
+      toggleNotices(true);
+    } else go(b.dataset.who);
   });
-  /* A menu that will not close is worse than no menu. */
-  document.addEventListener("click", () => toggleWhoMenu(false));
+  /* A menu that will not close is worse than no menu.  The panel is asked
+     here rather than swallowing its own clicks, because every button
+     inside it -- Clear, the links out -- is dispatched from this same
+     document listener and would never be reached. */
+  document.addEventListener("click", (e) => {
+    toggleWhoMenu(false);
+    if (!(e.target.closest && e.target.closest("#noticebox"))) {
+      toggleNotices(false);
+    }
+  });
   /* Enter in a Discover search box means search, because pressing it and
      having nothing happen is what every search box has taught people not to
      expect.  The author box has a suggestion list under it, so there Enter

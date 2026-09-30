@@ -57,6 +57,7 @@ import accounts
 import discover
 import feedback
 import mailer
+import notices
 import providers
 import redact
 import releases
@@ -744,6 +745,7 @@ def run_collect(email: str, full: bool = False, why: str = "manual") -> tuple:
         except Exception as exc:
             log("could not check what merged for %s: %s"
                 % (quiet_addr(email), exc))
+        raise_notices(email)
         return True, summary
     except subprocess.TimeoutExpired:
         state["last_error"] = "timed out"
@@ -830,6 +832,144 @@ def tell_about_merges(email: str) -> int:
     log("merged mail to %s: %s (%d commit(s))"
         % (quiet_addr(email), "sent" if sent else why, len(fresh)))
     return len(fresh) if sent else 0
+
+
+# ------------------------------------------------- the notices this raises
+
+
+def notice_state_path(email: str) -> str:
+    return os.path.join(home_of(email), "noticed.json")
+
+
+def notice_state(email: str) -> dict:
+    try:
+        with open(notice_state_path(email), encoding="utf-8") as fh:
+            blob = json.load(fh)
+        return blob if isinstance(blob, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def notice_state_save(email: str, blob: dict) -> None:
+    try:
+        os.makedirs(home_of(email), exist_ok=True)
+        tmp = notice_state_path(email) + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(blob, fh)
+        os.replace(tmp, notice_state_path(email))
+    except OSError:
+        pass
+
+
+# Only the two that are not somebody's subsystem tree.  Everything else is
+# already the name a maintainer would use for it -- net-next, asoc, gpio --
+# and translating those would be inventing vocabulary.
+TREE_WORDS = {"mainline": "Linus' tree", "linux-next": "linux-next"}
+
+# Furthest along first, so a notice that has to be cut short keeps the part
+# worth reading: reaching mainline is the news, and the subsystem tree it
+# came through on the way is not.
+TREE_ORDER = ["mainline", "linux-next"]
+
+
+def landing_notices(email: str) -> int:
+    """One notice for whatever moved since the last collection.
+
+    One, not one each: a first collection finds a career at once, and a
+    quiet week finds six patches queued by the same maintainer in the same
+    hour.  Either way that is a single piece of news -- "six of yours moved,
+    here are three of them" -- and six notices saying nearly the same thing
+    would teach somebody to ignore the lot.
+
+    The first run after this feature existed says nothing at all.  Whoever
+    is reading has been watching these land for months; being told about
+    every one of them at once is not news, it is a backlog.
+    """
+    data = load_data(email)
+    rows = [m for m in (data.get("merged") or []) if m.get("commit")]
+    if not rows:
+        return 0
+
+    state = notice_state(email)
+    seen = set(state.get("commits") or [])
+    first_ever = "commits" not in state
+
+    fresh = [m for m in rows if str(m["commit"]) not in seen]
+    state["commits"] = sorted({str(m["commit"]) for m in rows})
+    notice_state_save(email, state)
+    if first_ever or not fresh:
+        return 0
+
+    fresh.sort(key=lambda m: str(m.get("date") or ""))
+    trees = sorted({t for m in fresh for t in (m.get("trees") or [])},
+                   key=lambda t: (TREE_ORDER.index(t) if t in TREE_ORDER
+                                  else len(TREE_ORDER), t))
+    named = [TREE_WORDS.get(t, t) for t in trees[:3]]
+    if len(trees) > 3:
+        named.append("%d more" % (len(trees) - 3))
+    where = ", ".join(named) or "a maintainer tree"
+
+    shown = [str(m.get("subject") or "").strip() for m in fresh[:3]]
+    more = len(fresh) - len(shown)
+    body = "; ".join(s for s in shown if s)
+    if more > 0:
+        body += " \u2014 and %d more" % more
+
+    title = ("A patch of yours landed" if len(fresh) == 1
+             else "%d patches of yours landed" % len(fresh))
+    notices.add(home_of(email), "landed", "%s in %s" % (title, where), body,
+                url=fresh[-1].get("url") or "")
+    return len(fresh)
+
+
+def cycle_notice(email: str) -> bool:
+    """Word when the tree moves on, which is the one thing here that is not
+    about this person's own patches.
+
+    It used to be a banner across the top of the overview, every visit, all
+    week.  It says the same thing for seven days at a time, so as a banner
+    it was furniture nobody read; as a notice it arrives once, when it
+    becomes true."""
+    data = load_data(email)
+    c = data.get("cycle") or {}
+    phase, tag = c.get("phase"), c.get("tag")
+    if not phase:
+        return False
+
+    # This KPI is counted off the posting that speaks for each patch, and
+    # "in-next" is a state a patch that reached mainline no longer has, so
+    # it is already the road's "sitting at linux-next" figure.  Counting
+    # the postings here instead would say 128 where the page says 125.
+    queued = ((data.get("kpis") or {}).get("in_next")) or 0
+    mine = (" %d of your patches are queued in linux-next." % queued
+            if queued else "")
+
+    if phase == "merge-window":
+        title = "The %s merge window is open" % (c.get("next") or "next")
+        body = ("Maintainers are sending pull requests to Linus rather than "
+                "reading the list. Quiet on anything you posted is the "
+                "calendar, not a snub." + mine)
+    else:
+        title = "%s. The merge window is shut" % (tag or c.get("version") or "")
+        body = ("%s is being stabilised, so maintainers are taking fixes for "
+                "it and queueing everything else for %s. Silence on a patch "
+                "this week is worth chasing."
+                % (c.get("version") or "This release", c.get("next") or "next")
+                + mine)
+
+    # Keyed on the phase and the tag together, so a new -rc is news and the
+    # same -rc collected again twenty minutes later is not.
+    return bool(notices.add(home_of(email), "release", title, body,
+                            key="cycle:%s:%s" % (phase, tag)))
+
+
+def raise_notices(email: str) -> None:
+    """Everything this server noticed on one person's behalf, after a run."""
+    try:
+        landing_notices(email)
+        cycle_notice(email)
+    except Exception as exc:                      # never fail a collection
+        log("could not raise notices for %s: %s" % (quiet_addr(email), exc))
 
 
 def start_first_collection(email: str, why: str = "first sign-in") -> None:
@@ -2226,6 +2366,11 @@ class Handler(BaseHTTPRequestHandler):
                 "interval": mine["interval"],
                 "next_run": next_run_for(me),
                 "theme": mine["theme"],
+                "look": mine["look"],
+                # Only the count: this rides a poll that runs while nobody
+                # is looking at the menu, and the notices themselves are
+                # worth a request of their own when somebody opens it.
+                "unread": notices.unread(home_of(me)),
                 "merged_mail": bool(mine["merged_mail"]),
                 # Whether anything could be sent at all, so the switch can
                 # say up front that this server has no way to send it.
@@ -2330,6 +2475,21 @@ class Handler(BaseHTTPRequestHandler):
             self.json_out(200, {"ok": True, "rows": feedback.everything(),
                                 "statuses": feedback.STATUSES,
                                 "kinds": feedback.KINDS})
+        elif path == "/api/notices":
+            rows = notices.read(home_of(me))
+            self.json_out(200, {"ok": True, "rows": rows,
+                                "unread": sum(1 for r in rows
+                                              if not r.get("read"))})
+        elif path == "/api/people":
+            # Who the owner can write to.  Addresses, so nobody has to be
+            # asked to type one from memory, and nobody else may ask: the
+            # list of everyone using a deployment is the deployment's.
+            if not feedback.is_owner(me):
+                self.json_out(403, {"ok": False, "error": "Not yours."})
+                return
+            self.json_out(200, {"ok": True, "people": [
+                {"email": p.get("email", ""), "seen": p.get("seen", "")}
+                for p in known_people()]})
         elif path == "/api/ai/chats":
             self.json_out(200, {"ok": True, "chats": chat_list(me)})
         elif path == "/api/ai/chat":
@@ -2559,6 +2719,52 @@ class Handler(BaseHTTPRequestHandler):
                     out["report"], (form.get("status") or "").strip(),
                     (form.get("note") or ""), log=log)
             self.json_out(200 if out.get("ok") else 400, out)
+        elif path == "/api/notices/read":
+            form = self.body()
+            ids = form.get("ids")
+            hit = notices.mark_read(home_of(me),
+                                    ids if isinstance(ids, list) else None)
+            self.json_out(200, {"ok": True, "marked": hit,
+                                "unread": notices.unread(home_of(me))})
+        elif path == "/api/notices/clear":
+            gone = notices.clear(home_of(me))
+            self.json_out(200, {"ok": True, "cleared": gone})
+        elif path == "/api/notices/send":
+            # The owner writing to somebody, or to everybody.  Delivered by
+            # writing one copy into each person's own list rather than by
+            # keeping a broadcast somebody has to be matched against: a
+            # notice is theirs once it is sent, it is marked read like any
+            # other, and somebody signing up tomorrow is not handed a
+            # month of announcements they were never here for.
+            if not feedback.is_owner(me):
+                self.json_out(403, {"ok": False, "error": "Not yours."})
+                return
+            form = self.body()
+            title = (form.get("title") or "").strip()[:160]
+            body = (form.get("body") or "").strip()[:4000]
+            to = (form.get("to") or "*").strip().lower()
+            if not title:
+                self.json_out(400, {"ok": False, "error": "Needs a subject."})
+                return
+
+            if to == "*":
+                whom = [p.get("email", "") for p in known_people()]
+            else:
+                whom = [p.get("email", "") for p in known_people()
+                        if (p.get("email") or "").lower() == to]
+                if not whom:
+                    self.json_out(400, {"ok": False,
+                                        "error": "Nobody here by that address."})
+                    return
+
+            sent = 0
+            for who in whom:
+                if who and notices.add(home_of(who), "word", title, body,
+                                       frm=me):
+                    sent += 1
+            log("notice from the owner to %s: %d delivered"
+                % ("everybody" if to == "*" else quiet_addr(to), sent))
+            self.json_out(200, {"ok": True, "sent": sent})
         elif path == "/api/ai/chat":
             form = self.body()
             entry = chat_put(me, (form.get("id") or "").strip()[:32],

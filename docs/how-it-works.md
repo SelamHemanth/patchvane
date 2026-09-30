@@ -76,7 +76,7 @@ means it is in their tree but has not reached linux-next yet.
 | **Discover** | Anybody else's patches, and who to send yours to |
 | **Settings** | Refresh schedule, the assistant, the sources, and support |
 
-Whoever runs the deployment has a ninth, **Feedback**, described at the end
+Whoever runs the deployment has a ninth, **Admin**, described at the end
 of this page. Nobody else has it, or can reach what is in it.
 
 Everything is reached by clicking it. There are no keyboard shortcuts to
@@ -296,6 +296,36 @@ appears on the patch list, the commits, the threads, the review tags, the
 Discover tables and the feedback. The search box beside them still takes
 `tree:net-next` and the like, and **Clear** puts everything back.
 
+## Notifications
+
+The bell in the account menu, with the count of what has not been read on
+the picture beside it. Opening it is the reading: everything in the list is
+marked at once, because a notice is one line and ticking them off
+individually would be inventing a chore. **Clear read** throws away what
+has been read and keeps anything that has not.
+
+Three things arrive there, and they are deliberately not sorted into three
+places:
+
+- **A patch of yours moved.** Raised after a collection, for anything that
+  reached a tree since the last one, and as one notice however many there
+  were — six patches queued by the same maintainer in the same hour is one
+  piece of news, and six lines saying nearly the same thing would teach
+  anybody to ignore the lot. The first collection after this existed says
+  nothing: you have been watching those land for months, and being told
+  about all of them at once is a backlog, not news.
+- **The tree moved on.** A new -rc, or the merge window opening, with how
+  many of your own commits the date applies to. This used to be a banner
+  across the top of the overview. It says the same sentence for the whole
+  week it is true, which is how something becomes furniture, so it arrives
+  once now, when it actually becomes true.
+- **Whoever runs the deployment said something.** Written from the Admin
+  section, to one address or to everybody.
+
+None of it is mailed. What is genuinely worth an email — an answer to
+something you reported, a patch of yours reaching mainline if you asked to
+be told — still goes by mail, and that is set up in Settings.
+
 ## Telling whoever runs it that something is wrong
 
 **Settings → Support** answers the common questions first — the ones that
@@ -310,13 +340,20 @@ the page used to tell people there was "nowhere for this to go" on a
 deployment with neither, which is a strange thing to say to somebody who has
 just found a bug.
 
-Whoever the deployment belongs to gets a **Feedback** section of their own
+Whoever the deployment belongs to gets an **Admin** section of their own
 in the sidebar, carrying the number of reports nobody has looked at yet,
 and listing everything sent, filtered by kind, status, page or person.
 Answering one sets where it stands (read, being worked on, done, not going
 to change, waiting on you) and can add a note. Both go back to whoever
 wrote it: by mail if the deployment can send mail, and on their own Support
 tab either way, so a report is never a message dropped into a hole.
+
+The same section is where word goes out. A subject, optionally a sentence
+or two, and either one address or everybody, and it arrives in their
+notifications the next time their page polls. Nothing about it is mailed,
+which is the point: a server being restarted on Saturday is worth a line in
+the corner of the page and is not worth an email, and a deployment that
+mails everybody about maintenance is a deployment people filter.
 
 Nobody on the deployment sees that section but its owner, and nobody has to
 set anything up to be one. `PATCHVANE_OWNER` still says who it is where

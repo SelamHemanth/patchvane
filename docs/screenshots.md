@@ -114,9 +114,9 @@ see. Nothing here comes from anyone's dashboard.</sub>
 </details>
 
 <details>
-<summary><b>&#128233; Feedback</b> &#8212; what everybody sent, for whoever runs the deployment</summary>
+<summary><b>&#128233; Admin</b> &#8212; reports to answer and word to send out, for whoever runs the deployment</summary>
 <br>
-<img src="images/shot-feedback.png" alt="The owner's feedback section" width="100%">
+<img src="images/shot-feedback.png" alt="The owner's admin section" width="100%">
 <br>
 <sub>A section only the owner has, carrying the number of reports nobody
 has read yet. The owner is <code>PATCHVANE_OWNER</code> where that is set
