@@ -1603,6 +1603,10 @@ def build(out: dict, brain=None) -> dict:
                 "in_mainline": "mainline" in where,
                 "in_next": "linux-next" in where,
                 "reply_count": len(mine_replies),
+                # The build robots reply to a great many patches without
+                # anyone having read them, so the count that stands for
+                # "a person looked at this" leaves them out.
+                "human_replies": sum(1 for r in mine_replies if not r["bot"]),
                 "reviewers": sorted({r["name"] for r in mine_replies
                                      if not r["bot"]}),
                 "tags": dedupe_tags(tags),
@@ -1659,6 +1663,34 @@ def build(out: dict, brain=None) -> dict:
 
 
 LANDED_STATES = ("merged", "in-next", "in-tree", "accepted")
+
+
+def speaking(patches: list) -> list:
+    """One posting per patch: the same row the page puts on screen.
+
+    Four versions of one typo fix are one piece of work, so counting every
+    posting said there were four.  The newest posting speaks for the patch,
+    except that a commit found against an earlier version is a fact about
+    the patch and not about that one posting, so its outcome carries over.
+
+    This is roster() in web/app.js, and the two have to stay in step: it is
+    what the tallies here are counting, and what the reader is looking at.
+    """
+    by = defaultdict(list)
+    for p in patches:
+        by[p["key"] or p["msgid"]].append(p)
+
+    rows = []
+    for group in by.values():
+        group.sort(key=lambda p: (p["version"], p["date"] or ""))
+        speaks = group[-1]
+        took = next((p for p in reversed(group) if p.get("landed")), None)
+        if took is not None and took is not speaks:
+            speaks = dict(speaks, state=took["state"],
+                          in_next=took["in_next"],
+                          in_mainline=took["in_mainline"])
+        rows.append(speaks)
+    return rows
 
 
 def link_versions(patches: list) -> None:
@@ -1720,6 +1752,12 @@ def link_versions(patches: list) -> None:
                                  else "the same patch was posted again")
             p["superseded_by"] = top
             p.pop("state_by_ai", None)
+            # Whatever tree this posting claimed, it claimed on the strength
+            # of a commit that turned out to belong to another version, so
+            # the claim goes with it.  Left set, these had the older posting
+            # counted as a second patch in linux-next.
+            p["in_mainline"] = False
+            p["in_next"] = False
 
 
 def soft_cases(patches: list, evidence: dict) -> list:
@@ -2121,13 +2159,15 @@ def waiting_on_us(thread: list, state: str = "", answered_at: str = "") -> bool:
 
 def assemble(out, patches, series, threads, tree_urls) -> dict:
     pw = out.get("patchwork", [])
+    # Everything counted below is counted per patch, not per posting.
+    per_patch = speaking(patches)
 
     # per tree, using the tree the subject asked for, falling back to the list
     def tree_of(p):
         return p["tree_hint"] or p["list"] or p["pw_project"] or "unspecified"
 
     trees = {}
-    for p in patches:
+    for p in per_patch:
         t = trees.setdefault(tree_of(p), {
             "tree": tree_of(p), "patches": 0, "merged": 0, "in_next": 0,
             "accepted": 0, "reviewed": 0, "open": 0, "problems": 0, "tags": 0,
@@ -2354,19 +2394,20 @@ def assemble(out, patches, series, threads, tree_urls) -> dict:
     activity = [a for a in activity if a["ts"]]
     activity.sort(key=lambda a: a["ts"], reverse=True)
 
-    states = Counter(p["state"] for p in patches)
-    netdev_open = sum(1 for p in patches
+    states = Counter(p["state"] for p in per_patch)
+    netdev_open = sum(1 for p in per_patch
                       if (p["tree_hint"] or "").startswith("net")
                       and p["state"] in ("awaiting", "under-review", "reviewed",
                                          "needs-ack"))
 
     kpis = {
-        "patches": len(patches),
+        "patches": len(per_patch),
+        "postings": len(patches),
         "series": len(series),
-        "unique_patches": len({p["key"] for p in patches}),
+        "unique_patches": len(per_patch),
         "versions": sum(1 for s in series if s["version"] > 1),
-        # every count comes off the patch state, so the cards, the donut and
-        # the tables can never disagree
+        # every count comes off the state of the posting that speaks for the
+        # patch, so the cards, the donut and the tables can never disagree
         "merged": states.get("merged", 0),
         "in_next": states.get("in-next", 0),
         "in_tree": states.get("in-tree", 0),
@@ -2632,9 +2673,9 @@ def main() -> int:
             log("standalone page not built: %s" % exc)
 
     k = data["kpis"]
-    log("%d patches in %d series | merged %d, in linux-next %d, "
+    log("%d patches (%d postings) in %d series | merged %d, in linux-next %d, "
         "maintainer tree %d | under review %d, awaiting %d | %d review tags"
-        % (k["patches"], k["series"], k["merged"], k["in_next"],
+        % (k["patches"], k["postings"], k["series"], k["merged"], k["in_next"],
            k["in_tree"] + k["accepted"], k["under_review"] + k["reviewed"],
            k["awaiting"], k["review_tags"]))
     return 0

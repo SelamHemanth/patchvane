@@ -204,12 +204,16 @@ function work() {
 const ROAD = [
   { key: "posted", label: "Written and sent", color: C.blue,
     blurb: "posted to a kernel list" },
-  { key: "answered", label: "Somebody answered", color: C.amber,
-    blurb: "a reply came back, or review started" },
+  /* The counts are cumulative, so each label has to be true of everything
+     at this rung and every rung above it. "Somebody answered" was not: a
+     quiet maintainer applies a typo fix without saying anything, and every
+     one of those was being counted as a reply nobody ever wrote. */
+  { key: "answered", label: "Somebody acted on it", color: C.amber,
+    blurb: "a person replied, or a maintainer just applied it" },
   { key: "taken", label: "A maintainer took it", color: C.purple,
     blurb: "applied to a tree, or marked accepted" },
-  { key: "next", label: "Queued in linux-next", color: C.cyan,
-    blurb: "lined up for the next merge window" },
+  { key: "next", label: "Reached linux-next", color: C.cyan,
+    blurb: "queued for a merge window, mainline included" },
   { key: "mainline", label: "In mainline", color: C.green,
     blurb: "the commit is in Linus' tree" },
 ];
@@ -220,7 +224,12 @@ function reached(p) {
   if (p.state === "merged" || p.in_mainline) return 4;
   if (p.state === "in-next" || p.in_next) return 3;
   if (LANDED.includes(p.state) || (p.landed || []).length) return 2;
-  if (p.reply_count > 0 || ANSWERED.includes(p.state)) return 1;
+  // A robot build report is not somebody answering, so the rung asks for
+  // a human reply. Older data carries no such count; fall back to the
+  // named reviewers, which have never included bots.
+  const said = p.human_replies !== undefined
+    ? p.human_replies : (p.reviewers || []).length;
+  if (said > 0 || ANSWERED.includes(p.state)) return 1;
   return 0;
 }
 
