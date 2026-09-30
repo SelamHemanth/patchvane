@@ -1934,6 +1934,19 @@ button.link.sm { font-size: 11px; margin-left: 6px; }
 .cycount i { display: block; margin-top: 3px; font-style: normal;
   font-size: 10.5px; line-height: 1.35; color: var(--ink-3); }
 
+/* Faint until pointed at: it is a way out of the notice, not a thing to
+   look at while reading it. */
+.cyshut { flex: none; align-self: flex-start; margin: -4px -4px 0 10px;
+  width: 24px; height: 24px; padding: 0; border: 0; border-radius: 7px;
+  background: none; color: var(--ink-3); cursor: pointer;
+  font-size: 17px; line-height: 1; opacity: .45;
+  transition: opacity var(--t-quick) var(--ease),
+              background var(--t-quick) var(--ease),
+              color var(--t-quick) var(--ease); }
+.cyshut:hover { opacity: 1; background: var(--panel-2); color: var(--ink-1); }
+.cyshut:focus-visible { opacity: 1; outline: 2px solid var(--blue);
+  outline-offset: 2px; }
+
 @media (max-width: 680px) {
   .cyrow { flex-wrap: wrap; padding: 13px 14px; }
   .cycount { border-left: 0; border-top: 1px solid var(--line);

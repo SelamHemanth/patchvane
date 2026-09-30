@@ -623,13 +623,54 @@ function viewOverview() {
    for a fortnight is a worry at -rc5 and is simply the calendar during the
    merge window, when maintainers are sending pull requests to Linus and not
    reading the list.  Told the date and left to work that out, nobody does. */
+/* Which piece of news this is. The phase and the tag together, so that a
+   new -rc, or the window opening, is a fresh notice and shows again rather
+   than staying hidden behind a dismissal of the last one. */
+function cycleNews(c) { return (c.phase || "") + ":" + (c.tag || ""); }
+
+/* Shown once a session and then only if asked for, because it says the same
+   thing all week. Dismissing it puts it away until the tree moves on.
+
+   Whether it has already been seen is read once per page load: marking it
+   seen on every render would have it vanish under the reader the moment
+   anything else on the page redrew. */
+let CYCLE_SHOWING = null;
+
+function cycleHidden(c) {
+  const news = cycleNews(c);
+  if (CYCLE_SHOWING === news) return false;
+  try {
+    if (localStorage.getItem("patchvane-cycle-dismissed") === news) return true;
+    if (sessionStorage.getItem("patchvane-cycle-seen") === news) return true;
+    sessionStorage.setItem("patchvane-cycle-seen", news);
+  } catch (e) { /* private browsing: show it, that is the harmless way */ }
+  CYCLE_SHOWING = news;
+  return false;
+}
+
+function cycleDismiss() {
+  const c = (S.data || {}).cycle;
+  if (!c) return;
+  try {
+    localStorage.setItem("patchvane-cycle-dismissed", cycleNews(c));
+  } catch (e) { /* nothing to do: it goes for this page load either way */ }
+  CYCLE_SHOWING = null;
+  const el = document.querySelector(".panel.cycle");
+  if (el) el.remove();
+}
+
 function cyclePanel() {
   const c = S.data.cycle;
   if (!c || !c.phase) return "";
+  if (cycleHidden(c)) return "";
   const window = c.phase === "merge-window";
   const opens = days(c.opens);
-  const queued = (S.data.merged || []).filter(
-    (m) => m.in_next && !m.mainline).length;
+  /* Counted off the patches, not off the commit list, so this agrees with
+     the "sitting here" figure on the road below. The two differ whenever a
+     maintainer took an earlier version: the commit is filed under the
+     posting that landed, while the patch is counted at the version that
+     speaks for it. */
+  const queued = work().filter((p) => reached(p) === 3).length;
 
   let head, note;
   if (window) {
@@ -666,6 +707,9 @@ function cyclePanel() {
         </div>
         ${!window && opens !== null ? `<div class="cycount">
           <b>${opens}</b><i>days until <br>${esc(c.next)} opens</i></div>` : ""}
+        <button class="cyshut" ${act(cycleDismiss)}
+          title="Put this away until the tree moves on"
+          aria-label="Dismiss this notice">&times;</button>
       </div>
     </div>
   </div>`;
@@ -787,6 +831,11 @@ function ledgerPanel(book, total) {
     <header><h2>Where all ${total} patches stand</h2>
       <span class="sub">one bucket each, so it adds up</span>
       <div class="spacer"></div>
+      ${info("ledger", `The same patches as the road above, sorted by where
+        they stopped rather than by how far they got. Every
+        <em>sitting here</em> and <em>dropped</em> count up there lands in
+        exactly one bucket down here: the two panels are the same total cut
+        two ways, so they add up to ${total} either way.`)}
       <span class="tally ${sum === total ? "ok" : "bad"}">
         ${book.map((b) => b.value).join(" + ")} = ${sum}${
           sum === total ? "" : `, but ${total} were posted`}</span>
@@ -914,7 +963,10 @@ function viewPatches() {
 function viewOutcomes() {
   const dropped = work().filter(closed);
   return tabs("out", [
-    ["landed", `Landed (${S.data.merged.length})`, viewLanded],
+    /* Commits, not patches. Fewer of these than patches a maintainer took:
+       a patch marked accepted in patchwork has no commit to show yet. The
+       tab says which it is so the number is not read against the road. */
+    ["landed", `Commits (${S.data.merged.length})`, viewLanded],
     ["dropped", `Dropped (${dropped.length})`, () => viewDropped(dropped)],
   ]);
 }
@@ -1002,7 +1054,7 @@ function viewLanded() {
         render: (r) => sha(r) },
       { key: "subject", label: "Subject", cls: "subject", width: "46%",
         csv: (r) => r.subject,
-        render: (r) => subj(r.msgid || r.series, r.subject) + (r.versions > 1
+        render: (r) => csubj(r, r.subject) + (r.versions > 1
           ? `<span class="tag">${r.versions} versions</span>` : "")
           + (r.series && r.series !== r.subject
             ? `<div class="sub2">posted as: ${mark(r.series)}</div>` : "") },
@@ -3922,6 +3974,17 @@ function closeThread() {
 function subj(id, text, cls) {
   return `<a class="${cls || ""}" href="#" ${act(openThread, id, text)}
     >${mark(text)}</a>`;
+}
+
+/* The subject of a commit, which opens the commit. Reading a commit subject
+   and landing in the mail thread that proposed it is the wrong door: the
+   thread is a link of its own wherever both are offered. Falls back to the
+   thread for a row that has no commit to open yet. */
+function csubj(row, text, cls) {
+  const id = row.commit || row.short;
+  if (!id) return subj(row.msgid || row.series, text, cls);
+  return `<a class="${cls || ""}" href="#"
+    ${act(openCommit, id, treeHolding(row))}>${mark(text)}</a>`;
 }
 
 /* Of the trees a patch landed in, the one worth linking to.  linux-next is

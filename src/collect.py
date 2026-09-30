@@ -2029,6 +2029,15 @@ def classify(pwrec, where, replies, msg, cover_replies=()) -> tuple:
             return ("accepted", "patchwork marked it accepted%s" % (
                 " (%s)" % pwrec["commit"][:12] if pwrec.get("commit") else ""),
                 True)
+        if st == "changes-requested" and any(
+                r["declined"] for r in list(replies) + list(cover_replies)
+                if not r["bot"]):
+            # A NACK is not a request for changes: it says do not send this
+            # again.  Patchwork has no state for refused, so maintainers
+            # reach for Changes Requested, and taking that at face value
+            # left outright rejections sitting in the column that means a
+            # new version is owed.
+            return "rejected", "nacked on %s" % pwrec["project"], True
         if st in ("changes-requested", "rejected", "superseded", "deferred",
                   "not-applicable", "handled-elsewhere", "awaiting-upstream",
                   "under-review", "needs-ack", "queued"):
@@ -2048,6 +2057,16 @@ def classify(pwrec, where, replies, msg, cover_replies=()) -> tuple:
     human = [r for r in replies if not r["bot"]]
     if any(t["tag"] == "Nacked-by" for r in human for t in r["tags"]):
         return "rejected", "nacked on the list", False
+
+    # A refusal is usually written once, to the cover letter, and meant for
+    # every patch under it; and it is far more often the bare word than the
+    # formal tag.  Read for both, in both places, or a series somebody
+    # turned down goes on being counted as one nobody has answered yet.
+    said_no = [r for r in list(human) + [c for c in cover_replies
+                                         if not c["bot"]] if r["declined"]]
+    if said_no:
+        return ("rejected", "%s turned it down on the list" % said_no[0]["name"],
+                False)
     if human:
         tags = [t for r in human for t in r["tags"]]
         if tags:
