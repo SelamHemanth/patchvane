@@ -238,6 +238,7 @@ function morph(selector, paint) {
   now.style.transition = "none";
   now.style.transformOrigin = "top left";
   now.style.transform = `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`;
+  squash(now, dx, dy);
   requestAnimationFrame(() => {
     now.style.transition = "transform " + motion("base", "spring");
     now.style.willChange = "transform";
@@ -248,6 +249,59 @@ function morph(selector, paint) {
       now.style.willChange = "";
     }, { once: true });
   });
+}
+
+/* A row of buttons too wide for the screen scrolls, and on a phone most
+   of them are: pressing the last one used to leave it half past the
+   right-hand edge, with the marker travelling off to somewhere you could
+   not see it land.  So bring it in afterwards.
+
+   By hand rather than with scrollIntoView, which also scrolls every
+   scrollable ancestor including the page -- and a page that jumps the
+   moment you press something takes the thing you pressed out from under
+   your thumb. */
+function showPicked(barSel) {
+  const bar = document.querySelector(barSel);
+  const on = bar && bar.querySelector("button.on");
+  if (!on || bar.scrollWidth <= bar.clientWidth) return;
+  const edge = 14;   /* a little daylight, so it does not sit against the end */
+  const near = on.offsetLeft - edge;
+  const far = on.offsetLeft + on.offsetWidth + edge;
+  let to = bar.scrollLeft;
+  if (far > bar.scrollLeft + bar.clientWidth) to = far - bar.clientWidth;
+  else if (near < bar.scrollLeft) to = near;
+  if (to === bar.scrollLeft) return;
+  bar.scrollTo({ left: to, behavior: MOTION.ok ? "smooth" : "auto" });
+}
+
+/* A marker that travels should not arrive the shape it left.
+
+   A drop of liquid crossing a surface stretches along the way it is
+   going -- the leading edge sets off first and surface tension drags the
+   rest after it -- then overshoots back past round and settles.  That
+   deformation is the entire difference between something that reads as
+   liquid and a rounded rectangle sliding, and no amount of easing on the
+   travel alone will produce it.
+
+   Said here as a pair of scale factors on a custom property rather than
+   as a transform, because the element doing the travelling is already
+   using its transform for that; the shape is carried by a bubble inside
+   it, which is free.  The stretch grows with how far there is to go and
+   then stops: stepping to the next tab should barely wobble, and
+   crossing the whole bar should not flatten into a pancake either. */
+function squash(el, dx, dy) {
+  if (!MOTION.ok || !el) return;
+  const far = Math.hypot(dx, dy);
+  if (far < 2) return;
+  const k = Math.min(0.34, 0.09 + far / 1200);
+  const sideways = Math.abs(dx) >= Math.abs(dy);
+  /* Thinner across the travel than it is longer along it: a drop keeps
+     its volume, and one that only ever grew would read as a balloon. */
+  el.style.setProperty("--sx", (sideways ? 1 + k : 1 - k * 0.55).toFixed(3));
+  el.style.setProperty("--sy", (sideways ? 1 - k * 0.55 : 1 + k).toFixed(3));
+  el.classList.remove("moving");
+  void el.offsetWidth;   /* so pressing twice in a row plays it twice */
+  el.classList.add("moving");
 }
 
 /* Panels and cards arrive in sequence instead of all at once.  Anything below
@@ -842,10 +896,14 @@ function grid(id, rows, cols, opts) {
         </div>` : ""}
       ${active ? `<button class="btn ghost sm" ${act(gridClear, id)}>Clear</button>` : ""}
       <div class="spacer"></div>
-      ${(opts.groups || []).length ? `<div class="seg" title="Group rows">
-        <button class="${!st.group ? "on" : ""}" ${act(gridGroup, id, "")}>flat</button>
+      ${(opts.groups || []).length ? `<div class="seg" data-seg="${esc(id)}"
+          title="Group rows">
+        <button class="${!st.group ? "on" : ""}" ${act(gridGroup, id, "")}>${
+          !st.group ? `<i class="segpill"></i>` : ""}<span>flat</span></button>
         ${opts.groups.map((g) => `<button class="${st.group === g.key ? "on" : ""}"
-          ${act(gridGroup, id, g.key)}>${esc(g.label)}</button>`).join("")}
+          ${act(gridGroup, id, g.key)}>${
+          st.group === g.key ? `<i class="segpill"></i>` : ""
+        }<span>${esc(g.label)}</span></button>`).join("")}
       </div>` : ""}
       ${sortPick(id, shown, st)}
       <button class="iconbtn sm densebtn ${st.dense ? "on" : ""}" ${act(gridDense, id)}
@@ -993,7 +1051,14 @@ function gridSearch(id, v) { GRIDS[id].q = v; GRIDS[id].page = 1; gridRedraw(id)
 function gridPage(id, n) { GRIDS[id].page = n; gridRedraw(id); }
 function gridPer(id, n) { GRIDS[id].per = +n; GRIDS[id].page = 1; gridRedraw(id); }
 function gridFilter(id, k, v) { GRIDS[id].filters[k] = v; GRIDS[id].page = 1; gridRedraw(id); }
-function gridGroup(id, k) { GRIDS[id].group = k; GRIDS[id].collapsed = []; gridRedraw(id); }
+/* Same as the tabs: the marker travels to the button you pressed rather
+   than being switched off here and on there. */
+function gridGroup(id, k) {
+  GRIDS[id].group = k;
+  GRIDS[id].collapsed = [];
+  morph(`[data-seg="${id}"] .segpill`, () => gridRedraw(id));
+  showPicked(`[data-seg="${id}"]`);
+}
 function gridDense(id) { GRIDS[id].dense = !GRIDS[id].dense; gridRedraw(id); }
 /* Only ever asked on a narrow screen: the button that calls this is not
    shown on one wide enough to hold the whole row of them. */

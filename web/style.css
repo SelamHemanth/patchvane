@@ -646,6 +646,61 @@ html[data-skin="liquid"] .step:hover {
 html[data-skin="liquid"] .step:active { transform: translateY(1px); }
 html[data-skin="liquid"] .stepface:hover { background: var(--sheen); }
 
+/* Each leg of the wobble eased gently into the next.  Not --ease, which
+   is the page's usual near-instant settle: a timing function applies
+   between every pair of keyframes, so an easing that spends itself in
+   the first third turns four stops into four separate snaps. */
+html[data-skin="liquid"] { --ease-wobble: cubic-bezier(.42, 0, .25, 1); }
+
+/* How a travelling marker deforms on the way.  Four stops, and the shape
+   of the thing is in which ones are furthest apart in time: it stretches
+   quickly, comes back through round more slowly, and spends the whole
+   back half settling.  The other order -- a slow stretch and a snap back
+   -- is what a spring does, not what a liquid does.
+
+   The rebound is a fraction of the stretch rather than its own number,
+   so there is one value to tune and the two halves cannot drift apart.
+   A little over half of it, not all: a drop that came back as far as it
+   went out has lost nothing on the way, and a thing that loses nothing
+   does not stop.  --sx and --sy come from squash() in ui.js, which sizes
+   them to how far there is to travel. */
+@keyframes liquidmove {
+  0%   { transform: scale(1, 1); }
+  24%  { transform: scale(var(--sx, 1.2), var(--sy, .9)); }
+  58%  { transform: scale(calc(1 - (var(--sx, 1.2) - 1) * .55),
+                          calc(1 - (var(--sy, .9)  - 1) * .55)); }
+  80%  { transform: scale(calc(1 + (var(--sx, 1.2) - 1) * .20),
+                          calc(1 + (var(--sy, .9)  - 1) * .20)); }
+  100% { transform: scale(1, 1); }
+}
+
+/* The tab pill is the same object at a different size, so it gets the
+   same treatment: a glass bead that flies between tabs and wobbles when
+   it lands.  morph() in ui.js already flies it; the bubble inside is
+   what makes the flight read as liquid. */
+html[data-skin="liquid"] .tabpill,
+html[data-skin="liquid"] .segpill {
+  background: none; box-shadow: none; border-radius: 999px;
+}
+html[data-skin="liquid"] .tabpill::before,
+html[data-skin="liquid"] .segpill::before {
+  content: ""; position: absolute; inset: 0;
+  border-radius: inherit;
+  background:
+    radial-gradient(64% 54% at 28% 12%, rgba(255,255,255,.34), transparent 72%),
+    var(--glass-soft);
+  box-shadow:
+    inset  1.1px  1.1px 0 var(--edge-cool),
+    inset -1.1px -1.1px 0 var(--edge-warm),
+    inset 0 5px 9px -7px rgba(255,255,255,.7),
+    0 1px 0 rgba(0,0,0,.26),
+    0 3px 8px -3px rgba(0,0,0,.42);
+}
+html[data-skin="liquid"] .tabpill.moving::before,
+html[data-skin="liquid"] .segpill.moving::before {
+  animation: liquidmove var(--t-slow) var(--ease-wobble);
+}
+
 /* The sliding marker behind the current section is the one block on the
    page that moves, so it is also the one where the thickness is obvious:
    you watch a solid object travel rather than a highlight change place. */
@@ -1931,14 +1986,23 @@ body.offline #aibtn, body.offline #refresh, body.offline .out { display: none; }
 .seg { display: flex; gap: 2px; padding: 2px; border-radius: 8px;
   background: var(--panel-2); border: 1px solid var(--line); }
 .seg button {
+  position: relative;
   border: 0; background: transparent; color: var(--ink-3); cursor: pointer;
   font: inherit; font-size: 11.5px; font-weight: 550; padding: 4px 10px;
   border-radius: 6px; white-space: nowrap;
   transition: all var(--t-fast) var(--ease);
 }
 .seg button:hover { color: var(--ink); }
-.seg button.on { background: var(--panel); color: var(--ink);
-  box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+.seg button.on { color: var(--ink); }
+/* The marker lives inside the button it belongs to and is flown from its
+   old one by morph() in ui.js -- the same arrangement as .tabpill, and
+   the reason the look sits on this rather than on the button: a
+   background cannot travel out of the element it is painted on. */
+.segpill {
+  position: absolute; inset: 0; border-radius: 6px;
+  background: var(--panel); box-shadow: 0 1px 2px rgba(0,0,0,.25);
+}
+.seg button > span { position: relative; }
 
 .menu {
   position: absolute; right: 16px; top: calc(100% - 6px); z-index: 30;
@@ -3522,12 +3586,49 @@ table.plain tr.main:hover, table.plain tr.main:hover + tr.sub {
                 0 -4px 30px -14px rgba(0,0,0,.70);
   }
 
-  /* And down there the marker is a tab along the top edge of the bar, not
-     a block that slides: a raised capsule inside a bar that is itself only
-     54px tall has nowhere to be raised to. */
+  /* Down there the marker is a bubble.  The bar is seven icons wide and
+     54px tall, which is no room for a block to stand up in, but it is
+     exactly the shape of a bead of water sitting on glass -- and a round
+     thing is the only thing that can deform convincingly, because a
+     rounded rectangle that stretches just looks like a rounded rectangle
+     with the wrong radius.
+
+     Two elements: this one travels, and the bubble inside it deforms.
+     Trying to do both on one transform means the squash fights the
+     journey for the same property and one of them has to be given up. */
   html[data-skin="liquid"] .navglow {
     background: transparent; border-radius: 0; box-shadow: none;
+    --bub: calc(min(var(--w, 54px), var(--h, 54px)) - 9px);
   }
+  html[data-skin="liquid"] .navglow::before {
+    content: "";
+    position: absolute;
+    left: 50%; top: 50%; right: auto; bottom: auto;
+    width: var(--bub); height: var(--bub);
+    /* Centred with the translate property, not with transform, so that
+       the animation below has the transform entirely to itself. */
+    translate: -50% -50%;
+    border-radius: 50%;
+    background:
+      radial-gradient(60% 50% at 30% 16%, rgba(255,255,255,.44), transparent 70%),
+      linear-gradient(150deg,
+        color-mix(in srgb, var(--blue) 52%, transparent),
+        color-mix(in srgb, var(--cyan) 34%, transparent));
+    -webkit-backdrop-filter: var(--glass-thin);
+    backdrop-filter: var(--glass-thin);
+    box-shadow:
+      inset  1.2px  1.2px 0 var(--edge-cool),
+      inset -1.2px -1.2px 0 var(--edge-warm),
+      inset 0 7px 11px -8px rgba(255,255,255,.80),
+      inset 0 -7px 11px -8px rgba(0,0,0,.45),
+      0 2px 0 rgba(0,0,0,.26),
+      0 5px 12px -4px rgba(0,0,0,.50);
+  }
+  html[data-skin="liquid"] .navglow.moving::before {
+    animation: liquidmove var(--t-slow) var(--ease-wobble);
+  }
+  /* White on the bubble rather than the blue it used to be on nothing. */
+  html[data-skin="liquid"] .navitem.active { color: #fff; }
 
   html[data-skin="liquid"] .panel.road .body { padding: 10px; }
   html[data-skin="liquid"] .road .steps { gap: 9px; }

@@ -3647,6 +3647,7 @@ function tabs(id, items, initial) {
 function TAB(id, k) {
   S.tabs[id] = k;
   morph(`[data-tabs="${id}"] .tabpill`, () => render());
+  showPicked(`[data-tabs="${id}"]`);
 }
 
 /* -------------------------------------------------------------- the AI */
@@ -4514,6 +4515,12 @@ function renderNav() {
   placeGlow();
 }
 
+/* Dragging a window edge moves the highlight without anybody having
+   pressed anything, and one that wobbles while the window is being
+   resized looks broken rather than alive. */
+let RESIZING = 0;
+let RESIZE_OFF = null;
+
 /* Put the highlight behind whichever section is open.  Settings and Profile
    are not in the sidebar, so there it has nothing to sit under and gets out
    of the way rather than pointing at the wrong thing. */
@@ -4523,14 +4530,29 @@ function placeGlow() {
   if (!glow) return;
   const on = nav.querySelector(".navitem.active");
   if (!on) { glow.classList.remove("on"); return; }
+  /* How far it is about to go, which is what tells it how much to
+     deform.  Only when it was already somewhere: the first placement of
+     the run, and every window resize, are not journeys and should not
+     wobble. */
+  const settled = glow.classList.contains("on");
+  const wasX = parseFloat(glow.style.getPropertyValue("--x")) || 0;
+  const wasY = parseFloat(glow.style.getPropertyValue("--y")) || 0;
   glow.style.setProperty("--x", on.offsetLeft + "px");
   glow.style.setProperty("--y", on.offsetTop + "px");
   glow.style.setProperty("--w", on.offsetWidth + "px");
   glow.style.setProperty("--h", on.offsetHeight + "px");
   glow.classList.add("on");
+  if (settled && !RESIZING) {
+    squash(glow, on.offsetLeft - wasX, on.offsetTop - wasY);
+  }
 }
 
-window.addEventListener("resize", placeGlow);
+window.addEventListener("resize", () => {
+  RESIZING = 1;
+  clearTimeout(RESIZE_OFF);
+  RESIZE_OFF = setTimeout(() => { RESIZING = 0; }, 200);
+  placeGlow();
+});
 
 const VIEWS = {
   overview:    ["Overview", "where everything stands today", viewOverview],
