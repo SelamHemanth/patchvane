@@ -5336,11 +5336,19 @@ function appearanceBox() {
         L.skin === k ? "on" : ""}" ${act(setSkin, k)}>${esc(name)}</button>`)
         .join("")}
     </div>
-    <p class="hint">Liquid blurs harder and rounds the corners further.
-      ${info("skin", `Blur is the expensive part of glass: the browser has
-      to read what is behind every pane and average it, on every frame that
-      moves. Classic is the lighter of the two and is what this starts on.
-      On an older laptop, or a long patch list, it is the one to stay on.`)}</p>
+    <p class="hint">Liquid is see-through, with a lit edge and raised blocks.
+      ${info("skin", `Classic panels are solid and sit flat. Liquid keeps
+      barely a sixth of the fill, so a wallpaper shows through the panes;
+      what reads as glass is the edge, which is lit cool on one side and
+      warm on the other the way the rim of a lens splits light, and the
+      blocks, which stand on a visible side rather than floating on a
+      shadow. Text stays readable because it carries a hairline of the page
+      colour around it, not because the pane is hiding anything.
+
+      Blur is the expensive part: the browser reads what is behind every
+      pane and averages it, on every frame that moves. Classic is the
+      lighter of the two and is what this starts on. On an older laptop, or
+      a long patch list, it is the one to stay on.`)}</p>
   </div>
 
   <div class="field">

@@ -239,20 +239,451 @@ html[data-theme="paper"] {
    pixels of blur under every panel is a real cost on a laptop, and this
    asks for half as much again. */
 html[data-skin="liquid"] {
-  --glass-blur: saturate(200%) blur(32px);
-  --glass-thin: saturate(170%) blur(17px);
-  --rim-top: rgba(255,255,255,.44);
-  --rim: rgba(255,255,255,.16);
-  --sheen: rgba(255,255,255,.13);
-  --r: 20px; --r-sm: 13px;
-  --lift: 5px;
+  /* Nearly no fill at all, and still readable.  Those two want opposite
+     things and the fight is normally settled by giving up on one of
+     them: a pane solid enough to read on is not glass, and glass you can
+     really see through has a wallpaper competing with every word.
+
+     Settled here in three parts, none of which is a fill.
+
+     The blur is long enough that nothing behind the pane survives as
+     detail, only as a field of colour -- detail is what actually fights
+     text, far more than brightness does.  Brightness then takes the
+     whole field down, away from the pale ink; and saturation puts back
+     the colour that the dimming cost, because luminance is the part that
+     has to move out of the way and hue is the part worth keeping.  The
+     wallpaper still flows through the pane in full colour.  It simply
+     does it somewhere the text is not.
+
+     No contrast reduction here, though the light palettes below use one.
+     Pulling contrast under one collapses everything towards mid grey,
+     which on a light page drags a dark wallpaper up and out of the way
+     of dark text -- the right direction -- and on this one would drag it
+     up into the pale text instead.  Same dial, opposite sign, so it only
+     goes where it helps.
+
+     Worth knowing if these numbers ever need changing: every readability
+     figure quoted below was measured with backdrop-filter doing nothing
+     at all, because no headless browser available here will composite
+     one.  So the fill, the inks and the halo are carrying the text on
+     their own and the filter is pure gain on top.  That is the right way
+     round -- it is also what happens on a machine that refuses the
+     filter for its own reasons -- but it does mean the numbers are a
+     floor rather than a description. */
+
+     The third part is on the text, further down: a tight halo in the
+     page's own colour.  That is what buys the transparency.  A pane
+     solid enough to read on is not glass, but text that carries its own
+     background is readable on almost nothing -- so the pane is allowed
+     to be almost nothing. */
+  --glass-pc:  15%;
+  --glass-up:  12%;
+  --glass-mid:  8%;
+  --glass-blur: blur(32px) brightness(.72) saturate(225%);
+  --glass-thin: blur(17px) brightness(.80) saturate(195%);
+  --rim-top: rgba(255,255,255,.52);
+  --rim: rgba(255,255,255,.17);
+  --sheen: rgba(255,255,255,.14);
+  --r: 24px; --r-sm: 15px;
+  --lift: 6px;
+
+  /* What makes it glass rather than a tinted pane.
+
+     A sheet of colour behind a blur is frosting.  What the eye reads as a
+     thick piece of glass is entirely in the edge: a lens bends the light
+     passing through its rim, so the rim is brighter than anything else in
+     the object, it is brightest where the surface curves most, and it
+     splits what it bends -- cool on one side of the arc, warm on the
+     other.  That is the whole trick, and it is why this is an arc around
+     the shape and not a flat border colour.
+
+     Done with inset shadows rather than a gradient ring.  A ring would
+     have to be a pseudo-element or a border-box background layer, and
+     neither survives contact with this page: the panes already spend
+     both their pseudo-elements, and a border-box gradient shows straight
+     through a fill that is deliberately half transparent.  Inset shadows
+     clip to the border-radius for free and can be aimed, which is all
+     the effect needs -- the split is directional, not a full sweep.
+
+     Cool down from the upper left and warm up from the lower right: that
+     opposition is the dispersion, and it is what stops the edge reading
+     as a border colour.  Each one twice -- once hard against the edge so
+     there is a line to see, once wide and soft so the line has a glow to
+     sit in.  The hard pass is the whole effect; a blurred shadow with a
+     negative spread never reaches the edge at all. */
+  --edge-cool: rgba(152,206,255,.92);
+  --edge-warm: rgba(255,172,142,.62);
+  --lens:
+    inset  1.2px  1.2px 0 var(--edge-cool),
+    inset -1.2px -1.2px 0 var(--edge-warm),
+    inset  4px  5px 14px -4px rgba(120,185,255,.34),
+    inset -4px -5px 14px -4px rgba(255,150,120,.22),
+    /* and the body of the lens: light pooling under the top face, shade
+       gathering at the bottom where a thick edge holds it back */
+    inset  0   18px 28px -22px rgba(255,255,255,.34),
+    inset  0  -16px 24px -18px rgba(0,0,0,.50);
+
+  /* Four shadows, each about twice the spread of the last.  One shadow
+     reads as a sticker; a run of them reads as something with a thickness
+     sitting above the page at a height you could name. */
+  --shadow-glass:
+    0 1px 1.5px rgba(0,0,0,.30),
+    0 5px 11px -5px rgba(0,0,0,.40),
+    0 16px 30px -14px rgba(0,0,0,.52),
+    0 38px 68px -34px rgba(0,0,0,.72);
 }
 
+/* On a light page the split runs the other way: the bright arc is what
+   shows against white, so it keeps the colour and loses the glare. */
 html[data-skin="liquid"][data-theme="light"],
 html[data-skin="liquid"][data-theme="paper"] {
+  /* Same move, aimed the other way: the text is dark here, so the
+     backdrop is pushed up into the white rather than down into the
+     black.  It needs a harder push than the dark palettes do -- there is
+     less room above a light page than there is below a dark one, and a
+     wallpaper is far more likely to be darker than a white page than it
+     is to be lighter than a black one. */
+  --glass-pc: 14%;
+  --glass-blur: blur(32px) contrast(.32) brightness(1.70) saturate(215%);
+  --glass-thin: blur(17px) contrast(.44) brightness(1.52) saturate(190%);
   --rim-top: rgba(255,255,255,.95);
   --rim: rgba(16,22,34,.075);
   --sheen: rgba(255,255,255,.7);
+  /* On a dark page the lit edge can be plain white and still be the
+     brightest thing in the shape.  Here the shape is already white, so
+     white is nothing: the edge has to read as colour, and the dispersion
+     is the only colour it has.  Which is the truer drawing anyway -- what
+     you actually see at the rim of a bead of water in daylight is blue
+     down one side and orange up the other, not a white line. */
+  --edge-cool: rgba(96,166,255,.68);
+  --edge-warm: rgba(255,146,112,.48);
+  --lens:
+    inset  1.2px  1.2px 0 var(--edge-cool),
+    inset -1.2px -1.2px 0 var(--edge-warm),
+    inset  4px  5px 14px -4px rgba(96,160,240,.20),
+    inset -4px -5px 14px -4px rgba(232,136,110,.15),
+    inset  0   18px 28px -22px rgba(255,255,255,.92),
+    inset  0  -16px 24px -18px rgba(16,22,34,.14);
+  --shadow-glass:
+    0 1px 1.5px rgba(16,22,34,.07),
+    0 5px 11px -5px rgba(16,22,34,.10),
+    0 16px 30px -14px rgba(16,22,34,.13),
+    0 38px 68px -34px rgba(16,22,34,.18);
+}
+
+/* Every glass surface gets the same edge, so they read as pieces of one
+   material rather than as a panel style and, separately, a button style. */
+html[data-skin="liquid"] .panel,
+html[data-skin="liquid"] .kpi,
+html[data-skin="liquid"] .noticebox,
+html[data-skin="liquid"] .whomenu,
+html[data-skin="liquid"] .drawer,
+html[data-skin="liquid"] .toast,
+html[data-skin="liquid"] .tabs,
+html[data-skin="liquid"] .seg,
+html[data-skin="liquid"] .iconbtn,
+html[data-skin="liquid"] .chipbar .chip:not(.on),
+html[data-skin="liquid"] .btn:not(.primary):not(.ghost) {
+  border: 1px solid var(--rim);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-glass), var(--lens);
+}
+
+/* The fields too.  A search box and a sort menu left as solid slabs in a
+   toolbar made of glass is the one thing that gives the whole effect
+   away -- they sit right at the top of the page, next to the chips that
+   did get it, and read as something the stylesheet forgot.  Less rim
+   than a pane gets: an input wants to look like a hole you type into,
+   not like another object sitting on top. */
+html[data-skin="liquid"] .search input,
+html[data-skin="liquid"] select,
+html[data-skin="liquid"] .pk {
+  background: var(--glass-soft);
+  -webkit-backdrop-filter: var(--glass-thin);
+  backdrop-filter: var(--glass-thin);
+  border: 1px solid var(--rim);
+  border-radius: 999px;
+  box-shadow:
+    inset  1px  1px 0 var(--edge-cool),
+    inset -1px -1px 0 var(--edge-warm),
+    inset 0 2px 7px -3px rgba(0,0,0,.35);
+}
+html[data-skin="liquid"] .sortpick select { box-shadow: none; }
+
+/* The small round ones are where the arc shows best, so they are drawn
+   as circles and capsules the way the reference draws them: there is no
+   stretch of straight edge for the light to go flat along. */
+html[data-skin="liquid"] .iconbtn { border-radius: 50%; }
+html[data-skin="liquid"] .chip,
+html[data-skin="liquid"] .btn,
+html[data-skin="liquid"] .tabs,
+html[data-skin="liquid"] .seg { border-radius: 999px; }
+html[data-skin="liquid"] .tabs button,
+html[data-skin="liquid"] .seg button { border-radius: 999px; }
+
+/* Lifting it brightens the edge rather than only moving the box: tilting
+   a piece of glass towards a light is what makes its rim catch. */
+html[data-skin="liquid"] .kpi:hover,
+html[data-skin="liquid"] .iconbtn:hover,
+html[data-skin="liquid"] .btn:hover {
+  transform: translateY(calc(var(--lift) * -1));
+  filter: brightness(1.1) saturate(1.08);
+}
+
+/* A backdrop-filter is only as good as what is behind it, and a flat page
+   is nothing at all: half the reference is the red of the leaves smeared
+   through the glass, and none of that exists if the thing behind the pane
+   is one colour.  So with a wallpaper on, the veil over it comes down and
+   the panes open up -- there is finally something worth bending. */
+html[data-skin="liquid"][data-wall] {
+  --glass-pc: 13%;
+  --veil: 30%;
+}
+
+/* The light palettes keep more veil, for the same reason they get the
+   harder brightness push: a wallpaper is nearly always darker than a
+   white page, so on a light theme every bit of it that comes through is
+   working against the text rather than with it. */
+html[data-skin="liquid"][data-wall][data-theme="light"],
+html[data-skin="liquid"][data-wall][data-theme="paper"] {
+  --glass-pc: 22%;
+  --veil: 60%;
+}
+
+/* The one thing a sheet of transparency never gets by itself: a specular.
+
+   Water on glass is visible almost entirely because of two marks -- a
+   small hard bright spot where the light source reflects off the curve
+   near the top, and a wider soft bloom around it.  Without them a
+   transparent shape is a hole in the page; with them it is an object,
+   and the eye will insist on a surface it cannot otherwise see.
+
+   Small and high and off to one side, because that is where a reflection
+   of a window lands on a bead of water.  Fixed rather than following the
+   pointer: a highlight that chases the mouse is a toy, and this is a
+   page of numbers somebody reads all day. */
+html[data-skin="liquid"] .panel::before {
+  background:
+    radial-gradient(42% 60% at 16% -6%,
+      rgba(255,255,255,.52), rgba(255,255,255,.10) 46%, transparent 72%),
+    radial-gradient(90% 46% at 70% -16%,
+      rgba(190,225,255,.22), transparent 70%),
+    linear-gradient(168deg, rgba(255,255,255,.14) 0%, transparent 38%);
+  opacity: 1;
+}
+
+/* A pane's header is thicker than its body.  That is how a real one is
+   built -- the part that carries the controls is a heavier piece than the
+   window beneath it -- and it is also where the quietest line on the page
+   lives, the grey half-sentence after the title.  Measured across six
+   palettes and six wallpapers, that caption was the worst text on the
+   screen every single time; a sixth of a fill under it is what brings it
+   back level with everything else. */
+html[data-skin="liquid"] .panel > header {
+  background: color-mix(in srgb, var(--panel) 15%, transparent);
+}
+html[data-skin="liquid"][data-theme="light"] .panel > header,
+html[data-skin="liquid"][data-theme="paper"] .panel > header {
+  background: color-mix(in srgb, var(--panel) 42%, transparent);
+}
+
+/* The blocks get their own, smaller.  A specular is a reflection of the
+   light, not of the object, so it is about the same size on a rung as it
+   is on the pane the rung is sitting in -- which means that relative to
+   the block it has to be bigger, and relative to the page, the same. */
+html[data-skin="liquid"] .step {
+  background-image:
+    radial-gradient(58% 48% at 20% -4%,
+      rgba(255,255,255,.34), rgba(255,255,255,.07) 48%, transparent 76%),
+    linear-gradient(166deg, rgba(255,255,255,.10) 0%, transparent 44%);
+}
+
+/* The halo.  A hair of the page's own colour laid tight around every
+   glyph, so each letter carries the contrast it needs with it instead of
+   borrowing it from a surface that is barely there.
+
+   One pixel of blur and no offset: far enough to separate a letter from
+   whatever is flowing behind it, nowhere near far enough to read as a
+   drop shadow or to soften the type.  It is the trick subtitles have used
+   over moving pictures forever, and it is the only reason the fill above
+   can be fifteen percent and the words still be crisp.
+
+   Two shadows rather than one because a single pass at this radius is
+   thin on the diagonals, where a stroke meets a bright patch at the worst
+   angle.  Colour-mixed from --bg so each palette haloes in its own
+   darkness or its own white, rather than in a black that would ring the
+   light themes. */
+html[data-skin="liquid"] .content,
+html[data-skin="liquid"] .sidebar,
+html[data-skin="liquid"] .topbar {
+  text-shadow:
+    0 0 1px color-mix(in srgb, var(--bg) 82%, transparent),
+    0 1px 2px color-mix(in srgb, var(--bg) 58%, transparent);
+}
+
+/* Tight and dark-side-only on the light palettes.  A halo works by being
+   the opposite of the glyph, and on a light page it is not: the second
+   lines there are mid grey, so a white bloom around them lands on their
+   own antialiasing and thins the letter instead of backing it -- the
+   text goes faint exactly where it was supposed to go solid.  So no
+   offset pass at all, and what is left is a single hairline that stops
+   short of the stroke. */
+html[data-skin="liquid"][data-theme="light"] .content,
+html[data-skin="liquid"][data-theme="light"] .sidebar,
+html[data-skin="liquid"][data-theme="light"] .topbar,
+html[data-skin="liquid"][data-theme="paper"] .content,
+html[data-skin="liquid"][data-theme="paper"] .sidebar,
+html[data-skin="liquid"][data-theme="paper"] .topbar {
+  text-shadow: 0 0 1px color-mix(in srgb, var(--bg) 70%, transparent);
+}
+/* Not on anything already drawn on a solid of its own: a badge, a filled
+   button, a coloured pill.  Those have their own background and a halo on
+   them is just a smudge. */
+html[data-skin="liquid"] .btn.primary,
+html[data-skin="liquid"] .chip.on,
+html[data-skin="liquid"] .pill,
+html[data-skin="liquid"] .tag,
+html[data-skin="liquid"] .badge,
+html[data-skin="liquid"] .count,
+html[data-skin="liquid"] code,
+html[data-skin="liquid"] pre { text-shadow: none; }
+
+/* Glass costs contrast, and it comes out of the quietest line on the page
+   first.  A pane you can see through is a pane with a wallpaper behind it,
+   and on a dark palette the wallpaper is lighter than the page, so the
+   second lines -- captions, sub-headings, the small grey explanations --
+   lose about a sixth of their separation from what they sit on.
+   Measured, not guessed: worst case across six palettes and six
+   wallpapers went 3.1 to 2.7 before this, and comes back to about 3.1
+   after it.
+
+   Paid back by moving those inks a fifth of the way towards the main
+   text colour rather than by making the glass more solid, because the
+   glass is the point and the grey is not.  Written out per palette:
+   a custom property cannot be defined in terms of itself, and six plain
+   values are easier to read than a scheme that avoids saying them. */
+html[data-skin="liquid"]                        { --ink-3: #828ea1; }
+html[data-skin="liquid"][data-theme="midnight"] { --ink-3: #7d889a; }
+html[data-skin="liquid"][data-theme="graphite"] { --ink-3: #8a8a8f; }
+html[data-skin="liquid"][data-theme="ocean"]    { --ink-3: #7d979e; }
+html[data-skin="liquid"][data-theme="light"]    { --ink-3: #5a6472; }
+html[data-skin="liquid"][data-theme="paper"]    { --ink-3: #6a6456; }
+
+/* ------------------------------------------------------------- 3D blocks */
+
+/* What makes something look like a solid object rather than a rectangle
+   with a shadow under it is its side.  A single soft shadow says the
+   thing is floating; a short stack of hard shadows, each one pixel
+   further down and a little weaker, is the side of the slab catching
+   less light the further it gets from the top face.  Four pixels of it
+   is enough -- past that it stops being a block and starts being a
+   cartoon.  The soft shadows after it are the cast on the page below. */
+html[data-skin="liquid"] {
+  --block:
+    inset  1.2px  1.2px 0 var(--edge-cool),
+    inset -1.2px -1.2px 0 var(--edge-warm),
+    inset  4px  5px 13px -4px rgba(120,185,255,.30),
+    inset -4px -5px 13px -4px rgba(255,150,120,.20),
+    0 1px 0 rgba(0,0,0,.42),
+    0 2px 0 rgba(0,0,0,.26),
+    0 3px 0 rgba(0,0,0,.14),
+    0 4px 0 rgba(0,0,0,.07),
+    0 7px 13px -5px rgba(0,0,0,.50),
+    0 20px 34px -14px rgba(0,0,0,.58);
+}
+html[data-skin="liquid"][data-theme="light"],
+html[data-skin="liquid"][data-theme="paper"] {
+  --block:
+    inset  1.2px  1.2px 0 var(--edge-cool),
+    inset -1.2px -1.2px 0 var(--edge-warm),
+    inset  4px  5px 13px -4px rgba(96,160,240,.22),
+    inset -4px -5px 13px -4px rgba(232,136,110,.16),
+    0 1px 0 rgba(16,22,34,.11),
+    0 2px 0 rgba(16,22,34,.07),
+    0 3px 0 rgba(16,22,34,.04),
+    0 4px 0 rgba(16,22,34,.02),
+    0 7px 13px -5px rgba(16,22,34,.13),
+    0 20px 34px -14px rgba(16,22,34,.16);
+}
+
+/* The road's five rungs stop being columns ruled off from each other and
+   become five separate blocks sitting in the pane.  The hairline grid
+   they used for dividers goes, because blocks with a gap between them
+   divide themselves. */
+html[data-skin="liquid"] .panel.road .body { padding: 13px; }
+html[data-skin="liquid"] .road .steps {
+  background: none; gap: 11px;
+}
+html[data-skin="liquid"] .step {
+  background: var(--glass-soft);
+  border: 1px solid var(--rim);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  box-shadow: var(--block);
+  transition: transform var(--t-base) var(--ease-spring),
+              box-shadow var(--t-base) var(--ease);
+}
+
+/* Pressing a block should push it into the page, so the side it was
+   standing on has to shorten by exactly what it sinks -- otherwise it
+   slides down the page still four pixels tall, which reads as a
+   rectangle moving rather than an object being pressed. */
+html[data-skin="liquid"] .step:hover {
+  transform: translateY(-3px);
+  box-shadow:
+    inset  1.4px  1.4px 0 var(--edge-cool),
+    inset -1.4px -1.4px 0 var(--edge-warm),
+    inset  4px  5px 16px -3px rgba(120,185,255,.44),
+    inset -4px -5px 16px -3px rgba(255,150,120,.30),
+    0 1px 0 rgba(0,0,0,.42), 0 2px 0 rgba(0,0,0,.30),
+    0 3px 0 rgba(0,0,0,.20), 0 4px 0 rgba(0,0,0,.13),
+    0 5px 0 rgba(0,0,0,.07), 0 6px 0 rgba(0,0,0,.03),
+    0 12px 20px -6px rgba(0,0,0,.52),
+    0 30px 48px -18px rgba(0,0,0,.62);
+}
+html[data-skin="liquid"] .step:active { transform: translateY(1px); }
+html[data-skin="liquid"] .stepface:hover { background: var(--sheen); }
+
+/* The sliding marker behind the current section is the one block on the
+   page that moves, so it is also the one where the thickness is obvious:
+   you watch a solid object travel rather than a highlight change place. */
+html[data-skin="liquid"] .navglow {
+  border-radius: 999px;
+  background: linear-gradient(100deg,
+    color-mix(in srgb, var(--blue) 30%, var(--glass-soft)),
+    var(--glass-soft) 68%);
+  box-shadow: var(--block);
+}
+
+/* The two edge-to-edge sheets get the lit edge only on the side that
+   faces the page.  A rim all the way round an element with two edges off
+   the screen draws a box where there is no box. */
+html[data-skin="liquid"] .sidebar {
+  box-shadow: inset -1.2px 0 0 var(--edge-cool),
+              inset -4px 0 16px -6px rgba(120,185,255,.26),
+              4px 0 34px -18px rgba(0,0,0,.72);
+}
+html[data-skin="liquid"] .topbar {
+  box-shadow: inset 0 -1.2px 0 var(--edge-cool),
+              inset 0 -5px 16px -6px rgba(120,185,255,.26),
+              inset 0 1.2px 0 rgba(255,255,255,.22),
+              0 14px 30px -24px rgba(0,0,0,.9);
+}
+
+/* The small tallies are blocks too, at the scale where a block is a bead:
+   full capsules, so there is no straight edge for the edge light to flatten
+   out along. */
+html[data-skin="liquid"] .tally,
+html[data-skin="liquid"] .tr {
+  border-radius: 999px;
+  background: var(--glass-soft);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.34),
+    inset 0 -1px 0 rgba(0,0,0,.26),
+    0 1px 0 rgba(0,0,0,.30), 0 2px 0 rgba(0,0,0,.16),
+    0 4px 9px -3px rgba(0,0,0,.42);
 }
 
 /* The wallpaper, behind everything and never scrolling with it.
@@ -3038,4 +3469,92 @@ table.plain tr.main:hover, table.plain tr.main:hover + tr.sub {
   .infomark::after, .search .qhelp::after {
     content: ""; position: absolute; inset: -9px; border-radius: 50%;
   }
+}
+
+/* ------------------------------------------------- liquid, on a phone */
+
+/* A backdrop blur is paid for per pixel, every frame, and a phone has a
+   great many of them for the GPU it is allowed to use.  Nothing here
+   changes the look: at arm's length on a 390px screen a thirty pixel
+   blur and a sixteen pixel one are the same picture, and the far cast
+   shadows are drawn past the edge of the screen as often as not.  So the
+   radius comes down and the shadow stacks lose their outermost layers,
+   which is where almost all of the cost was and none of the shape is. */
+@media (max-width: 680px) {
+  html[data-skin="liquid"] {
+    --glass-blur: blur(15px) brightness(.72) saturate(215%);
+    --glass-thin: blur(8px) brightness(.80) saturate(190%);
+    --r: 20px; --r-sm: 14px;
+    --lift: 4px;
+    --shadow-glass:
+      0 1px 1.5px rgba(0,0,0,.30),
+      0 5px 11px -5px rgba(0,0,0,.42),
+      0 16px 28px -14px rgba(0,0,0,.55);
+    --block:
+      inset  1.2px  1.2px 0 var(--edge-cool),
+      inset -1.2px -1.2px 0 var(--edge-warm),
+      inset  4px  5px 13px -4px rgba(120,185,255,.30),
+      0 1px 0 rgba(0,0,0,.42),
+      0 2px 0 rgba(0,0,0,.24),
+      0 3px 0 rgba(0,0,0,.11),
+      0 7px 13px -5px rgba(0,0,0,.50);
+  }
+  html[data-skin="liquid"][data-theme="light"],
+  html[data-skin="liquid"][data-theme="paper"] {
+    --glass-blur: blur(15px) contrast(.32) brightness(1.70) saturate(205%);
+    --glass-thin: blur(8px) contrast(.44) brightness(1.52) saturate(185%);
+    --block:
+      inset  1.2px  1.2px 0 var(--edge-cool),
+      inset -1.2px -1.2px 0 var(--edge-warm),
+      inset  4px  5px 13px -4px rgba(96,160,240,.22),
+      0 1px 0 rgba(16,22,34,.11),
+      0 2px 0 rgba(16,22,34,.06),
+      0 3px 0 rgba(16,22,34,.03),
+      0 7px 13px -5px rgba(16,22,34,.13);
+  }
+
+  /* The rail has lain down along the bottom of the screen, so the edge
+     that faces the page is its top one.  Left as a right-hand rim it
+     would draw a bright line down the side of the phone. */
+  html[data-skin="liquid"] .sidebar {
+    box-shadow: inset 0 1.2px 0 var(--edge-cool),
+                inset 0 5px 16px -6px rgba(120,185,255,.26),
+                0 -4px 30px -14px rgba(0,0,0,.70);
+  }
+
+  /* And down there the marker is a tab along the top edge of the bar, not
+     a block that slides: a raised capsule inside a bar that is itself only
+     54px tall has nowhere to be raised to. */
+  html[data-skin="liquid"] .navglow {
+    background: transparent; border-radius: 0; box-shadow: none;
+  }
+
+  html[data-skin="liquid"] .panel.road .body { padding: 10px; }
+  html[data-skin="liquid"] .road .steps { gap: 9px; }
+
+  /* The cards the tables turn into are blocks too -- which is the whole
+     reason the phone layout is worth having this skin on: a stack of
+     objects reads as a list far better than ruled rows do. */
+  html[data-skin="liquid"] .grid tbody tr {
+    margin-bottom: 9px; border-radius: var(--r-sm);
+    background: var(--glass-soft);
+    box-shadow: var(--block);
+  }
+  html[data-skin="liquid"] .grid tbody tr + tr { border-top: 0; }
+  html[data-skin="liquid"] .grid tbody td .mono,
+  html[data-skin="liquid"] .grid tbody td.links a { border-radius: 999px; }
+}
+
+/* A finger has no hover, but a browser will leave one switched on after a
+   tap and the block stays lifted until something else is pressed -- which
+   reads as the page having got stuck.  Pressing still works: that is the
+   :active rule, and it is the honest half of the pair. */
+@media (hover: none) and (pointer: coarse) {
+  html[data-skin="liquid"] .step:hover {
+    transform: none; box-shadow: var(--block);
+  }
+  html[data-skin="liquid"] .kpi:hover,
+  html[data-skin="liquid"] .iconbtn:hover,
+  html[data-skin="liquid"] .btn:hover { transform: none; filter: none; }
+  html[data-skin="liquid"] .stepface:hover { background: none; }
 }
