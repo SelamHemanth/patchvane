@@ -558,6 +558,22 @@ def norm(s: str) -> str:
     return s
 
 
+def subj_parts(key: str) -> tuple:
+    """Split a normalised subject into its subsystem prefix and the rest.
+
+    "bus: mhi: host: fix typo in comment" -> ({"bus", "mhi", "host"},
+    "fix typo in comment").  Only leading "word:" runs count as prefix, so a
+    subject with no colon keeps all of its text as the rest."""
+    head, rest = [], key
+    while True:
+        m = re.match(r"^([^:]{1,40}):\s+(.*)$", rest)
+        if not m:
+            break
+        head.append(m.group(1))
+        rest = m.group(2)
+    return {t for seg in head for t in re.split(r"[\s/,]+", seg) if t}, rest
+
+
 def dec(value) -> str:
     if not value:
         return ""
@@ -1084,6 +1100,11 @@ CGIT_ROW = re.compile(r"<tr>(.*?)</tr>", re.S)
 CGIT_SHA = re.compile(r"commit/\?id=([0-9a-f]{7,40})'>(.*?)</a>", re.S)
 CGIT_DATE = re.compile(r"title='(\d{4}-\d\d-\d\d[^']*)'")
 
+# How many commits to ask cgit for at once.  cgit may answer with fewer than
+# asked and may ignore the number entirely; what matters is that a full page
+# makes us ask for the next one.
+CGIT_PAGE = 500
+
 
 def my_names(out: dict) -> set:
     """Every form of their name that is genuinely theirs.
@@ -1113,40 +1134,57 @@ def cgit_author_log(f: Fetcher, base: str, path: str, mine: set = ()) -> list:
     whose author is somebody else does not belong to this person however it
     came back.  Without that check a subject like "fix typos in comments",
     which several people write in the same week, ends up credited to whoever
-    happened to ask."""
-    url = ("%s%s/log/?qt=author&q=%s&n=200"
-           % (base, path, urllib.parse.quote(ME)))
-    body = f.get(url, timeout=240)
-    if not body:
-        return []
-    found, refused = [], 0
-    for row in CGIT_ROW.findall(body):
-        m = CGIT_SHA.search(row)
-        if not m:
-            continue
-        d = CGIT_DATE.search(row)
-        subject = htmllib.unescape(re.sub(r"<[^>]+>", "", m.group(2))).strip()
-        if not subject:
-            continue
-        cells = [htmllib.unescape(re.sub(r"<[^>]+>", "", x)).strip()
-                 for x in re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)]
-        # date, subject, author, files, changes: the author is the one after
-        # the subject.
-        author = ""
-        for i, cell in enumerate(cells):
-            if subject.startswith(cell[:20]) and cell and i + 1 < len(cells):
-                author = cells[i + 1]
-                break
-        if mine and author and " ".join(author.lower().split()) not in mine:
-            refused += 1
-            continue
-        found.append({
-            "commit": m.group(1),
-            "subject": subject,
-            "author": author,
-            "key": norm(subject),
-            "date": (d.group(1) if d else "")[:19],
-        })
+    happened to ask.
+
+    The log is read a page at a time.  One request used to be enough, but a
+    busy year is already most of a page, and a tree that answers with exactly
+    a full page has more to give: stopping there would quietly lose the
+    oldest commits and show them as never applied."""
+    found, refused, seen, ofs = [], 0, set(), 0
+    while True:
+        url = ("%s%s/log/?qt=author&q=%s&n=%d&ofs=%d"
+               % (base, path, urllib.parse.quote(ME), CGIT_PAGE, ofs))
+        body = f.get(url, timeout=240)
+        if not body:
+            break
+        rows = CGIT_ROW.findall(body)
+        fresh = 0
+        for row in rows:
+            m = CGIT_SHA.search(row)
+            if not m:
+                continue
+            if m.group(1) in seen:
+                continue
+            seen.add(m.group(1))
+            fresh += 1
+            d = CGIT_DATE.search(row)
+            subject = htmllib.unescape(
+                re.sub(r"<[^>]+>", "", m.group(2))).strip()
+            if not subject:
+                continue
+            cells = [htmllib.unescape(re.sub(r"<[^>]+>", "", x)).strip()
+                     for x in re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)]
+            # date, subject, author, files, changes: the author is the one
+            # after the subject.
+            author = ""
+            for i, cell in enumerate(cells):
+                if subject.startswith(cell[:20]) and cell and i + 1 < len(cells):
+                    author = cells[i + 1]
+                    break
+            if mine and author and " ".join(author.lower().split()) not in mine:
+                refused += 1
+                continue
+            found.append({
+                "commit": m.group(1),
+                "subject": subject,
+                "author": author,
+                "key": norm(subject),
+                "date": (d.group(1) if d else "")[:19],
+            })
+        # Short page, or a page that told us nothing new: that is the end.
+        if fresh < CGIT_PAGE:
+            break
+        ofs += fresh
     if refused:
         log("  %s: ignored %d commit(s) by somebody else"
             % (path.strip("/").split("/")[-1] or path, refused))
@@ -1451,6 +1489,12 @@ def build(out: dict, brain=None) -> dict:
     # longer than that.
     PREFIX_ENOUGH = 34
 
+    # The text after the subsystem prefix, for the rewritten-prefix pass
+    # below.  It carries much less of the burden than PREFIX_ENOUGH does,
+    # because that pass also demands that one prefix contain the other, so
+    # this only has to rule out a body too short to mean anything.
+    BODY_ENOUGH = 12
+
     def landed_for(key: str) -> dict:
         """Which trees carry the commit for this patch.
 
@@ -1477,6 +1521,34 @@ def build(out: dict, brain=None) -> dict:
             # not swallow "fix typos in comments".
             rest = long[len(short):]
             if rest and not rest[0].isspace() and rest[0] not in ".,:;":
+                continue
+            hits.append(where)
+        if len(hits) == 1:
+            return hits[0]
+        if hits:
+            return {}
+
+        # A maintainer may rewrite the prefix rather than the tail: "mhi: fix
+        # typo" goes in as "bus: mhi: host: Fix typo", "perf:" as "perf
+        # tools:", "mfd:" as "mfd: wm831x:".  Neither subject is a prefix of
+        # the other, so the pass above cannot see it.  Match on the text after
+        # the prefix instead, and require the prefix we posted under to sit
+        # inside the one it went in under, so that "soc: fix typos in
+        # comments" cannot claim the hwmon commit carrying the same words.
+        #
+        # Only that direction.  A commit whose prefix is shorter than ours is
+        # a different patch, not ours reworded: "net: intel: fix typos" and
+        # "net: mac80211: fix typos" are two patches, and accepting the wider
+        # commit "net: fix typos" for either would credit both to one commit.
+        want, body = subj_parts(key)
+        if not want or len(body) < BODY_ENOUGH:
+            return {}
+        hits = []
+        for other, where in landed_by_key.items():
+            got, other_body = subj_parts(other)
+            if other_body != body or not got:
+                continue
+            if not want <= got:
                 continue
             hits.append(where)
         return hits[0] if len(hits) == 1 else {}
