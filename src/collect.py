@@ -443,6 +443,52 @@ NOT_APPLIED_RE = re.compile(
     r"\b(not|n't|cannot|can not|won't|unable|fails?|failed|failing|"
     r"does not|doesn)\b[^.\n]{0,24}$", re.I)
 
+# The merge robots do not only say a patch was applied, they say what it
+# became: tip-bot2 prints a Commit-ID, patchwork's bot links each patch to
+# its commit.  A sha is not a turn of phrase that might have been read
+# wrong, it is the patch's name in a tree, and it is worth more than any
+# review that arrives afterwards.
+BOT_COMMIT = re.compile(
+    r"^\s*Commit-ID:\s*([0-9a-f]{12,40})\b"
+    r"|git\.kernel\.org/[^\s]+/c/([0-9a-f]{8,40})", re.M | re.I)
+
+# Which patches that commit is made of.  The robots cite them by message-id,
+# which is the one name for a patch that no maintainer can reword.
+MSGID_LINK = re.compile(
+    r"(?:patch\.msgid\.link|lore\.kernel\.org)/(?:all/)?"
+    r"([^\s<>/\"]+@[^\s<>/\"]+?)/?(?:\s|$)", re.I)
+
+# "merged into the irq/drivers branch of tip:" and patchwork's "applied to
+# netdev/net-next.git".  Only the tree is wanted; the branch is whatever the
+# maintainer calls this cycle's queue.
+BOT_TREE = re.compile(
+    r"merged into (?:the\s+)?\S+\s+branch of\s+([\w.-]+)"
+    r"|applied to\s+([\w/.-]+?)\.git", re.I)
+
+
+def merge_notice(body: str) -> tuple:
+    """What a robot's merge announcement says: the commit, the tree it went
+    into, and every patch that went into it.
+
+    Returns ("", "", []) for anything that is not one."""
+    m = BOT_COMMIT.search(body or "")
+    if not m:
+        return "", "", []
+    t = BOT_TREE.search(body)
+    tree = (t.group(1) or t.group(2)) if t else ""
+    return m.group(1) or m.group(2), tree, MSGID_LINK.findall(body)
+
+
+def announced_commit(replies) -> str:
+    """The commit a robot says this patch became, if one did."""
+    for r in replies or ():
+        if not r.get("bot") or not r.get("applied"):
+            continue
+        sha, _, _ = merge_notice(r.get("body") or "")
+        if sha:
+            return sha
+    return ""
+
 
 # "Hi Hemanth," "Hello,", "Dear all:" -- an opening with nothing in it.
 GREETING_RE = re.compile(
@@ -1479,9 +1525,52 @@ def build(out: dict, brain=None) -> dict:
 
     # key -> {tree: record}
     landed_by_key = defaultdict(dict)
+    landed_by_commit = defaultdict(dict)
     for tree, rows in landed.items():
         for r in rows:
             landed_by_key[r["key"]][tree] = r
+            landed_by_commit[r["commit"]][tree] = r
+
+    # What the merge robots said, collected before the patches are walked,
+    # because a robot does not always say it where it is needed.  tip-bot2
+    # announces one commit on one thread and names by message-id every patch
+    # that went into it, so when two patches are folded together the second
+    # one never hears.  Its own thread is left with nothing but the review
+    # that arrived after the merge, which reads like a request for a v2.
+    #
+    # A message-id is the one name for a patch that no maintainer can reword,
+    # which makes this better evidence than any subject can be: it survives
+    # the fold that leaves the commit titled after neither patch.
+    announced = {}
+    for thread in threads.values():
+        for msg in thread:
+            if not msg.get("bot") or not msg.get("applied"):
+                continue
+            sha, tree, mids = merge_notice(msg.get("body") or "")
+            if not sha:
+                continue
+            for mid in mids:
+                announced.setdefault(mid, (sha, tree))
+
+    def announced_for(msgid: str, subject: str, key: str) -> dict:
+        """Where a robot said this patch went, shaped like landed_for().
+
+        The commit is usually already in hand from the tree sweep, filed
+        under the subject it was given rather than the one it was sent
+        under; prefer that record, because it carries the real date and
+        author.  Falling back to the robot's word covers a tree that is not
+        swept at all."""
+        told = announced.get(msgid)
+        if not told:
+            return {}
+        sha, tree = told
+        for full, trees in landed_by_commit.items():
+            if full.startswith(sha) or sha.startswith(full):
+                return dict(trees)
+        if not tree:
+            return {}
+        return {tree: {"commit": sha, "subject": subject, "key": key,
+                       "date": "", "author": ""}}
 
     # A subject long enough that two different patches are unlikely to share
     # it as a prefix.  "net: fix typos in comments" is 26 characters and
@@ -1609,7 +1698,7 @@ def build(out: dict, brain=None) -> dict:
                          if (c["series_version"] or 1) == version]
                 pwrec = (cands or pw_by_key.get(k, [None]))[0]
 
-            where = landed_for(k)
+            where = landed_for(k) or announced_for(m["msgid"], m["subject"], k)
             mine_replies = replies_for.get(m["msgid"], [])
             tags = [t for r in mine_replies for t in r["tags"]]
 
@@ -2123,6 +2212,17 @@ def classify(pwrec, where, replies, msg, cover_replies=()) -> tuple:
             return ("accepted",
                     "%s replied that it is applied%s" % (said[0]["name"],
                                                          where_said), False)
+    # A robot that names the commit is telling us the patch is in a tree, and
+    # that is a fact rather than a reading of someone's prose.  It has to be
+    # firm, or the thread goes on to the model as a guess worth a second
+    # opinion -- and the review that follows a merge is usually advice for
+    # next time, which reads exactly like a request for a v2.  tglx folded
+    # two irqchip patches and applied them the same day; Radu's "split these
+    # into three" came six days later, and the patch sat in "changes
+    # requested" asking for a version that was never owed.
+    sha = announced_commit(list(replies) + list(cover_replies))
+    if sha:
+        return "accepted", "a merge robot named it as %s" % sha[:12], True
     if any(r["applied"] for r in list(replies) + list(cover_replies)):
         return "accepted", "an automated notice said it was applied", False
 

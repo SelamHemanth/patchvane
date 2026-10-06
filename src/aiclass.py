@@ -60,6 +60,12 @@ Rules:
   request for any change means changes-requested, unless they clearly refuse
   it outright, which is rejected.
 - A bot saying a build failed is not a rejection by itself.
+- A merge robot naming the commit the patch became ("Commit-ID:", or a
+  git.kernel.org link) means accepted. It is a fact, not an opinion, and
+  nothing said afterwards undoes it.
+- Review that arrives after the patch was already merged is advice for the
+  author's next series, not a request to resend this one. Suggestions to
+  have split it up differently are the usual shape. Still accepted.
 - Reviewed-by, Acked-by or Tested-by with nobody applying it is reviewed.
 - Discussion with no conclusion is under-review.
 - Replies to a different version are context, not the answer. What a
@@ -172,16 +178,23 @@ def fingerprint(subject, replies, history=(), recorded="") -> str:
 
 
 def snippet(replies, limit=4) -> str:
-    """The human replies, trimmed to what carries the meaning.
+    """The replies that carry meaning, trimmed to the part that carries it.
 
     Quoted lines are dropped: a reply that quotes the whole patch tells the
     model nothing and costs a great deal of context.  A quoted line that the
     author is replying *about* is kept when it is short, because "Applied 1-2
-    to sched_ext" only makes sense next to the two subjects above it."""
+    to sched_ext" only makes sense next to the two subjects above it.
+
+    Robots are skipped, except the one announcing the merge.  Leaving that
+    out hands the model a review written after the patch had already landed
+    with nothing in the thread to say so, and "please split this up" then
+    reads as work still owed rather than as advice for next time.
+
+    The limit counts what is kept, not what was offered, so a thread that
+    opens with build noise does not push the people out of view."""
+    worth = [r for r in replies if not r["bot"] or r.get("applied")]
     out = []
-    for r in replies[:limit]:
-        if r["bot"]:
-            continue
+    for r in worth[:limit]:
         keep = []
         for l in (r.get("body") or "").splitlines():
             if re.match(r"^\s*On .*wrote:\s*$", l):
@@ -195,8 +208,9 @@ def snippet(replies, limit=4) -> str:
             keep.append(l)
         body = re.sub(r"\n{3,}", "\n\n", "\n".join(keep).strip())[:900]
         tags = ", ".join(t["tag"] for t in r.get("tags", []))
+        who = r["name"] + (" (a merge robot)" if r["bot"] else "")
         out.append("  %s said%s: %s"
-                   % (r["name"], " (%s)" % tags if tags else "",
+                   % (who, " (%s)" % tags if tags else "",
                       body or "(nothing quotable)"))
     return "\n".join(out)
 
