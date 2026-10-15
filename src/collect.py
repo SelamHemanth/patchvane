@@ -1998,7 +1998,7 @@ def subsystem(subject: str) -> str:
     return head if 0 < len(head) <= 24 and " " not in head else ""
 
 
-def answered_later(rows: list, version: int, since: str, sub: str):
+def answered_later(rows: list, version: int, since: str, sub: str, body: str = ""):
     """Ours, in the same subsystem, at a higher version, sent after `since`.
 
     This is the link that breaks exactly when it is needed.  Versions are
@@ -2008,11 +2008,22 @@ def answered_later(rows: list, version: int, since: str, sub: str):
     thread holding a request that was answered days ago and merged since."""
     if not sub or not since:
         return None
-    for q in rows:
-        if (q["version"] > version and (q["date"] or "") > since
-                and subsystem(q["subject"]) == sub):
-            return q
-    return None
+    hits = [q for q in rows
+            if q["version"] > version and (q["date"] or "") > since
+            and subsystem(q["subject"]) == sub]
+    if not hits:
+        return None
+    # A subsystem is a coarse net: "selftests" catches every patch sent under
+    # it, so the first hit is as likely to be a sibling from the same run as
+    # the patch that actually answers this one.  Either way the work has been
+    # spoken for, but only one of them is worth naming on the page.  What a
+    # rename tends to keep is the words after the colons -- "selftests: bpf:"
+    # became "selftests/bpf:" and the rest of the subject did not move.
+    if body:
+        same = [q for q in hits if subj_parts(norm(q["subject"]))[1] == body]
+        if same:
+            return same[0]
+    return hits[0]
 
 
 def cited_index(threads: dict) -> dict:
@@ -2097,30 +2108,75 @@ def mark_answered(patches: list, series_out: list, threads: dict) -> None:
         humans = sorted([m for m in thread if not m["bot"]],
                         key=lambda m: m["date"])
 
+        asked_at = max([m["date"] for m in humans if not m["mine"]]
+                       or [p["date"] or ""])
+
+        # Asked before "our message is the last one", because a posting that
+        # answers the review settles what became of the work, while having
+        # written the last mail only settles who is waiting.  A v1 answered
+        # by a v4 that was then turned down is superseded, and saying that is
+        # worth more than saying nobody is waiting on us.
+        note = ""
+        if cited_answer(thread, cited) > asked_at:
+            note = "you sent a patch citing this review"
+        elif p["version"] < p.get("latest_version", p["version"]):
+            note = "v%d went out" % p["latest_version"]
+        else:
+            sub = subsystem(p["subject"])
+            sent = answered_later(newer.get(sub) or [], p["version"],
+                                  asked_at, sub,
+                                  subj_parts(norm(p["subject"]))[1])
+            if sent:
+                note = "answered by %s" % sent["subject"]
+
+        # The state has to move too, not only the note.  Changes Requested is
+        # the one patchwork state that asks the author for something, so a v1
+        # left sitting in it goes on being counted and listed as work owed
+        # for ever -- long after the review was answered by a patch under a
+        # different title, and in one case long after the answer had been
+        # merged.  Patchwork will never update a v1; nobody goes back to it.
+        if note:
+            p["respin_note"] = note
+            p["state"] = "superseded"
+            p["state_detail"] = note
+            continue
+
+        # Everything below reads the thread to decide the state was wrong, so
+        # there has to be a thread.  Nothing but our own postings in it is
+        # the shape a failed fetch takes as well as the shape of silence, and
+        # reading the second as the first would quietly clear every real
+        # request on a bad run.  Say nothing and leave the state alone.
+        if not any(not m["mine"] for m in thread):
+            p["respin_owed"] = True
+            continue
+
         # Patchwork records "changes requested" whoever asked, and an author
         # writing "please drop this, three of the changes are wrong" sets the
         # same flag as a maintainer demanding a rewrite.  If our own message
         # is the last word, we have already answered and nobody is waiting.
-        if humans and humans[-1]["mine"]:
-            p["respin_note"] = "you answered this yourself"
+        # The conversation may still be live -- a question we asked that has
+        # gone unanswered -- so this is not settled, only not ours.
+        if any(not m["mine"] for m in humans):
+            if humans[-1]["mine"]:
+                p["respin_note"] = "you answered this yourself"
+                p["state"] = "under-review"
+                p["state_detail"] = "you wrote last; nothing asked of you"
+                continue
+            p["respin_owed"] = True
             continue
 
-        asked_at = max([m["date"] for m in humans if not m["mine"]]
-                       or [p["date"] or ""])
-
-        if cited_answer(thread, cited) > asked_at:
-            p["respin_note"] = "you sent a patch citing this review"
-            continue
-
-        if p["version"] < p.get("latest_version", p["version"]):
-            p["respin_note"] = "v%d went out" % p["latest_version"]
-            continue
-
-        sub = subsystem(p["subject"])
-        sent = answered_later(newer.get(sub) or [], p["version"], asked_at, sub)
-        if sent:
-            p["respin_note"] = "answered by %s" % sent["subject"]
-            continue
+        # Replies came back, but not one of them from a person.  Something
+        # set the state anyway -- a review bot's pw-bot line, or a maintainer
+        # clearing a queue -- and a patch can sit in Changes Requested with
+        # no record of anyone having asked for a change.  One of these was
+        # flagged by an AI reviewer over a use-after-free that pre-dated the
+        # patch and had nothing to do with the comment typo it was filed
+        # against.  Replies to the cover count, so a series reviewed in one
+        # mail at the top does not look unreviewed from each patch under it.
+        p["respin_note"] = "nobody asked for a change"
+        p["state"] = "under-review"
+        p["state_detail"] = "state set with no review on the list"
+        continue
 
         p["respin_owed"] = True
 
