@@ -2015,6 +2015,43 @@ def answered_later(rows: list, version: int, since: str, sub: str):
     return None
 
 
+def cited_index(threads: dict) -> dict:
+    """Message-id -> when we last pointed at it from a posting of our own.
+
+    Not every review is answered by a higher version.  "Real typos are
+    welcome, pls split and send" is answered by a fresh [PATCH]: new subject,
+    new thread, version 1, because the thing sent is a smaller patch and not
+    a second draft of the old one.  Neither the numbering nor the title ties
+    it back, so the request sits in the old thread for ever reading like work
+    still owed -- Vinod's was still being shown as needing a reply nine days
+    after the patch he asked for had been applied.
+
+    What does tie it back is the Link: the answer carries to the message it
+    answers.  A message-id is the one name for a message that nobody can
+    reword, and citing one is deliberate: it is the author saying which
+    request this posting discharges."""
+    out = {}
+    for thread in threads.values():
+        for m in thread:
+            if not m["mine"] or not m["date"]:
+                continue
+            for mid in MSGID_LINK.findall(m.get("body") or ""):
+                if m["date"] > out.get(mid, ""):
+                    out[mid] = m["date"]
+    return out
+
+
+def cited_answer(thread: list, cited: dict) -> str:
+    """When a later posting of ours cited a message in this thread.
+
+    The citing has to come after the message cited, or it is a back-reference
+    to older work rather than an answer to a request."""
+    spoke = [cited[m["msgid"]] for m in thread
+             if m.get("msgid") in cited
+             and cited[m["msgid"]] > (m["date"] or "")]
+    return max(spoke) if spoke else ""
+
+
 def mark_answered(patches: list, series_out: list, threads: dict) -> None:
     """When the newest version of a piece of work went out, and whether a new
     one is still owed.
@@ -2027,6 +2064,8 @@ def mark_answered(patches: list, series_out: list, threads: dict) -> None:
     by_series = defaultdict(list)
     for p in patches:
         by_series[p["series"]].append(p)
+
+    cited = cited_index(threads)
 
     # Everything we have posted, by what it touches, newest first.
     newer = defaultdict(list)
@@ -2068,6 +2107,10 @@ def mark_answered(patches: list, series_out: list, threads: dict) -> None:
 
         asked_at = max([m["date"] for m in humans if not m["mine"]]
                        or [p["date"] or ""])
+
+        if cited_answer(thread, cited) > asked_at:
+            p["respin_note"] = "you sent a patch citing this review"
+            continue
 
         if p["version"] < p.get("latest_version", p["version"]):
             p["respin_note"] = "v%d went out" % p["latest_version"]
@@ -2487,8 +2530,17 @@ def assemble(out, patches, series, threads, tree_urls) -> dict:
         if sub:
             newer[sub].append(p)
 
-    def answered(stem_key, fallback):
+    cited = cited_index(threads)
+
+    def answered(stem_key, thread, fallback):
         """When this thread's work was last spoken for by a newer posting."""
+        # Asked first, because it is the only one of these that the author
+        # stated outright rather than it being inferred from a subject or a
+        # version number, and the only one that survives the answer being a
+        # different, smaller patch under a name of its own.
+        spoke = cited_answer(thread, cited)
+        if spoke:
+            return spoke
         rows = by_stem.get(stem_key) or []
         if not rows:
             return fallback
@@ -2534,7 +2586,7 @@ def assemble(out, patches, series, threads, tree_urls) -> dict:
                 "waiting_on_us": (not s.get("no_reply_wanted")
                                   and waiting_on_us(
                                       thread, state,
-                                      answered(stem_key,
+                                      answered(stem_key, thread,
                                                s.get("answered_at", "")))),
                 "last_from": last["name"],
                 "last_date": last["date"],
